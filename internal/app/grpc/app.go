@@ -1,6 +1,7 @@
 package grpcapp
 
 import (
+	"context"
 	authgrpc "core/internal/grpc/auth"
 	"fmt"
 	"log/slog"
@@ -55,10 +56,20 @@ func (a *App) Run() error {
 	return nil
 }
 
-func (a *App) Stop() {
-	const op = "grpcapp.Stop"
+func (a *App) Stop(ctx context.Context) error {
+	done := make(chan struct{})
 
-	a.log.With(slog.String("op", op)).Info("stopping gRPC server", slog.Int("port", a.port))
+	go func() {
+		a.gRPCServer.GracefulStop()
+		close(done)
+	}()
 
-	a.gRPCServer.GracefulStop()
+	select {
+	case <-done:
+		a.log.Info("grpcApp closed successfully")
+		return nil
+	case <-ctx.Done():
+		a.log.Warn("grpcApp close timed out", "error", ctx.Err())
+		return fmt.Errorf("shutdown timeout: %w", ctx.Err())
+	}
 }

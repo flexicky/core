@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	grpcapp "core/internal/app/grpc"
 	postgresapp "core/internal/app/postgres"
 	postgresStorage "core/internal/storage"
@@ -36,7 +37,13 @@ func New(
 	}
 }
 
-func (a *App) Shotdown() {
-	a.GRPCServer.Stop()
-	a.PGStorage.Stop()
+func (a *App) Shotdown(ctx context.Context) error {
+	if err := a.GRPCServer.Stop(ctx); err != nil {
+		return err
+	}
+	if err := a.PGStorage.Stop(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
