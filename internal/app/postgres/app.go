@@ -32,3 +32,21 @@ func New(
 		cfg:     cfg,
 	}, nil
 }
+
+func (a *App) Stop(ctx context.Context) error {
+	done := make(chan struct{})
+
+	go func() {
+		a.storage.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		a.log.Info("database pool closed successfuly")
+		return nil
+	case <-ctx.Done():
+		a.log.Warn("database pool close time out", slog.Any("error context", ctx.Err()))
+		return fmt.Errorf("shotdown timeout: %w", ctx.Err())
+	}
+}

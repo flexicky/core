@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"core/internal/app"
 	"core/internal/config"
 	"core/internal/storage"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
 // TODO crate database core
@@ -43,7 +45,12 @@ func main() {
 
 	log.Info("sttoping application", slog.String("signal", sign.String()))
 
-	application.GRPCServer.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := application.Shotdown(ctx); err != nil {
+		log.Error("graceful shutdown error", "error", err)
+	}
 
 	log.Info("Application stopped")
 }
