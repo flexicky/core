@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: core_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: core
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+volumes:
+  postgres_data:

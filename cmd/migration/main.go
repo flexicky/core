@@ -18,8 +18,31 @@ import (
 )
 
 func main() {
-	cfg := config.MustLoad()
+	createPresent := false
+	createVal := ""
+	for i := 1; i < len(os.Args); i++ {
+		a := os.Args[i]
+		switch {
+		case a == "--create":
+			createPresent = true
+			if i+1 < len(os.Args) {
+				createVal = os.Args[i+1]
+			}
+		case strings.HasPrefix(a, "--create="):
+			createPresent = true
+			createVal = strings.TrimPrefix(a, "--create=")
+		}
+	}
 
+	if createPresent && strings.TrimSpace(createVal) == "" {
+		panic("flag --create must have a non-empty value, e.g. --create product")
+	}
+	if createPresent {
+		createFile(createVal)
+		return
+	}
+
+	cfg := config.MustLoad()
 	log := setupLogger(cfg.Env)
 
 	log.Info("starting migrations")
@@ -142,4 +165,46 @@ func setupLogger(env string) *slog.Logger {
 	}
 
 	return log
+}
+
+func createFile(name string) error {
+	const dir = "./migrations"
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create migrations dir: %w", err)
+	}
+
+	files, err := filepath.Glob(filepath.Join(dir, "*.sql"))
+	if err != nil {
+		return fmt.Errorf("glob migrations: %w", err)
+	}
+
+	maxNum := 0
+
+	for _, f := range files {
+		base := filepath.Base(f)
+		parts := strings.SplitN(base, "_", 2)
+		n, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+		if n > maxNum {
+			maxNum = n
+		}
+	}
+
+	next := maxNum + 1
+	fileName := fmt.Sprintf("%03d_migration_%s.sql", next, name)
+	fullPath := filepath.Join(dir, fileName)
+
+	if _, err := os.Stat(fullPath); err == nil {
+		return fmt.Errorf("migration %s already exists", fullPath)
+	}
+
+	template := fmt.Sprintf("-- Migration: %s\n-- Auto-generated\n\n", name)
+	if err := os.WriteFile(fullPath, []byte(template), 0o644); err != nil {
+		return fmt.Errorf("write migration file: %w", err)
+	}
+
+	return nil
 }
