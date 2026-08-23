@@ -67,3 +67,7 @@ func (s *Storage) Close() {
 func (s *Storage) Pool() *pgxpool.Pool {
 	return s.pool
 }
+
+func ProviderStorage(cfg DBConfig, log *slog.Logger) (*Storage, error) {
+	return New(context.Background(), cfg, log)
+}

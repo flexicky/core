@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"core/internal/repository"
+	"core/internal/service"
 
 	corev1 "github.com/flexicky/protos/gen/go/proto/core"
 	"google.golang.org/grpc"
@@ -9,6 +11,7 @@ import (
 
 type serverApi struct {
 	corev1.UnimplementedAuthServer
+	userService service.UserSercive
 }
 
 func RegisterServerAPI(gRPC *grpc.Server) {
@@ -28,5 +31,15 @@ func (s *serverApi) Register(
 	ctx context.Context,
 	req *corev1.RegisterRequest,
 ) (*corev1.RegisterResponse, error) {
-	panic("implement me")
+	params := repository.UserCreateParams{
+		Email:    req.GetEmail(),
+		Password: req.GetPassword(),
+	}
+
+	user, err := s.userService.CreateUser(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	return &corev1.RegisterResponse{Id: user.Id}, nil
 }
