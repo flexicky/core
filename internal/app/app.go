@@ -35,3 +35,8 @@ func New(
 		PGStorage:  pgApp,
 	}
 }
+
+func (a *App) Shotdown() {
+	a.GRPCServer.Stop()
+	a.PGStorage.Stop()
+}

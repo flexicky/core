@@ -32,3 +32,7 @@ func New(
 		cfg:     cfg,
 	}, nil
 }
+
+func (a *App) Stop() {
+	a.storage.Close()
+}
