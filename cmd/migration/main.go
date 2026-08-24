@@ -201,8 +201,7 @@ func createFile(name string) error {
 		return fmt.Errorf("migration %s already exists", fullPath)
 	}
 
-	template := fmt.Sprintf("-- Migration: %s\n-- Auto-generated\n\n", name)
-	if err := os.WriteFile(fullPath, []byte(template), 0o644); err != nil {
+	if err := os.WriteFile(fullPath, []byte(""), 0o644); err != nil {
 		return fmt.Errorf("write migration file: %w", err)
 	}
 
