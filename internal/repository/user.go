@@ -35,14 +35,14 @@ type userRepo struct {
 	pool *postgreStorage.Storage
 }
 
-func New(st *postgreStorage.Storage) UserRepository {
+func NewUserRepo(st *postgreStorage.Storage) UserRepository {
 	return &userRepo{pool: st}
 }
 
 func (r *userRepo) Create(ctx context.Context, params UserCreateParams) (*User, error) {
 	const query = `
-		INSERT INTO users (name, email, password, telegram_id, telegram_username, max_id, max_username)
-		VALUES($1, $2, $3, $4, $5)
+		INSERT INTO users (name, email, pass, telegram_id, telegram_username, max_id, max_username)
+		VALUES($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at
 	`
 	user := &User{

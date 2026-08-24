@@ -4,6 +4,7 @@ import (
 	"context"
 	"core/internal/repository"
 	"core/internal/service"
+	"fmt"
 
 	corev1 "github.com/flexicky/protos/gen/go/proto/core"
 	"google.golang.org/grpc"
@@ -14,8 +15,10 @@ type serverApi struct {
 	userService service.UserSercive
 }
 
-func RegisterServerAPI(gRPC *grpc.Server) {
-	corev1.RegisterAuthServer(gRPC, &serverApi{})
+func RegisterServerAPI(gRPC *grpc.Server, userService service.UserSercive) {
+	corev1.RegisterAuthServer(gRPC, &serverApi{
+		userService: userService,
+	})
 }
 
 func (s *serverApi) Login(
@@ -31,6 +34,7 @@ func (s *serverApi) Register(
 	ctx context.Context,
 	req *corev1.RegisterRequest,
 ) (*corev1.RegisterResponse, error) {
+	fmt.Print("sex")
 	params := repository.UserCreateParams{
 		Email:    req.GetEmail(),
 		Password: req.GetPassword(),
