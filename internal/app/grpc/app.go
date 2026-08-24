@@ -3,6 +3,9 @@ package grpcapp
 import (
 	"context"
 	authgrpc "core/internal/grpc/auth"
+	"core/internal/repository"
+	"core/internal/service"
+	"core/internal/storage"
 	"fmt"
 	"log/slog"
 	"net"
@@ -19,10 +22,14 @@ type App struct {
 func New(
 	Log *slog.Logger,
 	port int,
+	pgStorage storage.Storage,
 ) (*App, error) {
 	gRPCServer := grpc.NewServer()
 
-	authgrpc.RegisterServerAPI(gRPCServer)
+	userRepository := repository.NewUserRepo(&pgStorage)
+	userService := service.NewUserService(userRepository)
+
+	authgrpc.RegisterServerAPI(gRPCServer, userService)
 
 	return &App{
 		log:        Log,

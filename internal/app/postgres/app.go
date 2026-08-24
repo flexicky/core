@@ -50,3 +50,7 @@ func (a *App) Stop(ctx context.Context) error {
 		return fmt.Errorf("shotdown timeout: %w", ctx.Err())
 	}
 }
+
+func (a *App) GetStorage() postgresStorage.Storage {
+	return a.storage
+}

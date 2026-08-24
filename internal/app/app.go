@@ -21,14 +21,15 @@ func New(
 	tokenTTL time.Duration,
 	dbCfg postgresStorage.DBConfig,
 ) *App {
-	grpcApp, err := grpcapp.New(log, grpcPort)
-	if err != nil {
-		log.Info("error init grpc server %w", err)
-	}
 
 	pgApp, err := postgresapp.New(log, dbCfg)
 	if err != nil {
 		log.Info("error init postgres db %w", err)
+	}
+
+	grpcApp, err := grpcapp.New(log, grpcPort, pgApp.GetStorage())
+	if err != nil {
+		log.Info("error init grpc server %w", err)
 	}
 
 	return &App{
