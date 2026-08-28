@@ -4,7 +4,6 @@ import (
 	"context"
 	"core/internal/repository"
 	"core/internal/service"
-	"fmt"
 
 	corev1 "github.com/flexicky/protos/gen/go/proto/core"
 	"google.golang.org/grpc"
@@ -34,7 +33,6 @@ func (s *serverApi) Register(
 	ctx context.Context,
 	req *corev1.RegisterRequest,
 ) (*corev1.RegisterResponse, error) {
-	fmt.Print("sex")
 	params := repository.UserCreateParams{
 		Email:    req.GetEmail(),
 		Password: req.GetPassword(),

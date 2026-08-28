@@ -18,17 +18,18 @@ type User struct {
 }
 
 type UserCreateParams struct {
-	Name             string
-	Email            string
+	Name             string `validate:"omitempty,min=1,max=50"`
+	Email            string `validate:"email, omitempty,min=5,max=100"`
 	TelegramId       string
 	TelegramUsername string
 	MaxId            string
 	MaxUsername      string
-	Password         string
+	Password         string `validate:"omitempty,min=6,max=200"`
 }
 
 type UserRepository interface {
 	Create(ctx context.Context, params UserCreateParams) (*User, error)
+	GetUser(ctx context.Context, userId int) (*User, error)
 }
 
 type userRepo struct {
@@ -37,6 +38,13 @@ type userRepo struct {
 
 func NewUserRepo(st *postgreStorage.Storage) UserRepository {
 	return &userRepo{pool: st}
+}
+
+func nilStringOrNil(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func (r *userRepo) Create(ctx context.Context, params UserCreateParams) (*User, error) {
@@ -55,14 +63,27 @@ func (r *userRepo) Create(ctx context.Context, params UserCreateParams) (*User, 
 	}
 
 	err := r.pool.Pool().QueryRow(ctx, query,
-		user.Name,
-		user.Email,
-		params.Password,
-		user.TelegramId,
-		user.TelegramUsername,
-		user.MaxId,
-		user.MaxUsername,
+		nilStringOrNil(user.Name),
+		nilStringOrNil(user.Email),
+		nilStringOrNil(params.Password),
+		nilStringOrNil(user.TelegramId),
+		nilStringOrNil(user.TelegramUsername),
+		nilStringOrNil(user.MaxId),
+		nilStringOrNil(user.MaxUsername),
 	).Scan(&user.Id, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
+func (r *userRepo) GetUser(ctx context.Context, userId int) (*User, error) {
+	query := `SELECT * FROM users WHERE id = $1`
+
+	user := &User{}
+
+	err := r.pool.Pool().QueryRow(ctx, query, userId).Scan(&user.Id, &user.Name, &user.Email, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
