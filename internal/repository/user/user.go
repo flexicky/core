@@ -1,4 +1,4 @@
-package repository
+package user
 
 import (
 	"context"
@@ -15,6 +15,7 @@ type User struct {
 	MaxId            string
 	MaxUsername      string
 	CreatedAt        time.Time
+	Password         string
 }
 
 type UserCreateParams struct {
@@ -29,7 +30,8 @@ type UserCreateParams struct {
 
 type UserRepository interface {
 	Create(ctx context.Context, params UserCreateParams) (*User, error)
-	GetUser(ctx context.Context, userId int) (*User, error)
+	GetUserById(ctx context.Context, userId int) (*User, error)
+	GetUserByEmail(ctx context.Context, email string) (*User, error)
 }
 
 type userRepo struct {
@@ -51,8 +53,9 @@ func (r *userRepo) Create(ctx context.Context, params UserCreateParams) (*User, 
 	const query = `
 		INSERT INTO users (name, email, pass, telegram_id, telegram_username, max_id, max_username)
 		VALUES($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, created_at
+		RETURNING id, created_at, pass
 	`
+
 	user := &User{
 		Name:             params.Name,
 		Email:            params.Email,
@@ -70,7 +73,7 @@ func (r *userRepo) Create(ctx context.Context, params UserCreateParams) (*User, 
 		nilStringOrNil(user.TelegramUsername),
 		nilStringOrNil(user.MaxId),
 		nilStringOrNil(user.MaxUsername),
-	).Scan(&user.Id, &user.CreatedAt)
+	).Scan(&user.Id, &user.CreatedAt, &user.Password)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +81,20 @@ func (r *userRepo) Create(ctx context.Context, params UserCreateParams) (*User, 
 	return user, nil
 }
 
-func (r *userRepo) GetUser(ctx context.Context, userId int) (*User, error) {
+func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	query := `SELECT * FROM users WHERE email = $1`
+
+	user := &User{}
+
+	err := r.pool.Pool().QueryRow(ctx, query, email).Scan(&user.Id, &user.Name, &user.Email, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
+}
+
+func (r *userRepo) GetUserById(ctx context.Context, userId int) (*User, error) {
 	query := `SELECT * FROM users WHERE id = $1`
 
 	user := &User{}

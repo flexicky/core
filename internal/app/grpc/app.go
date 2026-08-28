@@ -3,7 +3,7 @@ package grpcapp
 import (
 	"context"
 	authgrpc "core/internal/grpc/auth"
-	"core/internal/repository"
+	"core/internal/repository/user"
 	"core/internal/service"
 	"core/internal/storage"
 	"fmt"
@@ -26,7 +26,7 @@ func New(
 ) (*App, error) {
 	gRPCServer := grpc.NewServer()
 
-	userRepository := repository.NewUserRepo(&pgStorage)
+	userRepository := user.NewUserRepo(&pgStorage)
 	userService := service.NewUserService(userRepository)
 
 	authgrpc.RegisterServerAPI(gRPCServer, userService)

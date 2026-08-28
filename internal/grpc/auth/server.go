@@ -2,7 +2,7 @@ package auth
 
 import (
 	"context"
-	"core/internal/repository"
+	"core/internal/repository/user"
 	"core/internal/service"
 
 	corev1 "github.com/flexicky/protos/gen/go/proto/core"
@@ -33,7 +33,7 @@ func (s *serverApi) Register(
 	ctx context.Context,
 	req *corev1.RegisterRequest,
 ) (*corev1.RegisterResponse, error) {
-	params := repository.UserCreateParams{
+	params := user.UserCreateParams{
 		Email:    req.GetEmail(),
 		Password: req.GetPassword(),
 	}
