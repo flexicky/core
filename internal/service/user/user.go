@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	userDto "core/internal/dto/user"
 	"core/internal/repository/user"
 
 	"golang.org/x/crypto/bcrypt"
@@ -18,9 +19,9 @@ type UserCreateParams struct {
 }
 
 type UserSercive interface {
-	CreateUser(ctx context.Context, params user.UserCreateParams) (*user.User, error)
-	GetUserById(ctx context.Context, id int) (*user.User, error)
-	GetUserByEmail(ctx context.Context, email string) (*user.User, error)
+	CreateUser(ctx context.Context, params userDto.NewUser) (*userDto.User, error)
+	GetUserById(ctx context.Context, id int) (*userDto.User, error)
+	GetUserByEmail(ctx context.Context, email string) (*userDto.User, error)
 	CheckPasswordHash(password, hash string) bool
 }
 
@@ -42,7 +43,7 @@ func (s *userService) CheckPasswordHash(password, hash string) bool {
 	return err == nil
 }
 
-func (s *userService) CreateUser(ctx context.Context, params user.UserCreateParams) (*user.User, error) {
+func (s *userService) CreateUser(ctx context.Context, params userDto.NewUser) (*userDto.User, error) {
 
 	passwordHash, err := s.hashPassword(params.Password)
 	if err != nil {
@@ -54,7 +55,7 @@ func (s *userService) CreateUser(ctx context.Context, params user.UserCreatePara
 	return s.repo.Create(ctx, params)
 }
 
-func (s *userService) GetUserById(ctx context.Context, userId int) (*user.User, error) {
+func (s *userService) GetUserById(ctx context.Context, userId int) (*userDto.User, error) {
 	user, err := s.repo.GetUserById(ctx, userId)
 	if err != nil {
 		return nil, err
@@ -63,7 +64,7 @@ func (s *userService) GetUserById(ctx context.Context, userId int) (*user.User, 
 	return user, nil
 }
 
-func (s *userService) GetUserByEmail(ctx context.Context, email string) (*user.User, error) {
+func (s *userService) GetUserByEmail(ctx context.Context, email string) (*userDto.User, error) {
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil, err

@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	authConst "core/internal/const/auth"
+	authDto "core/internal/dto/auth"
+	sessionDto "core/internal/dto/session"
 	"core/internal/repository/session"
 	"core/internal/service/token"
 	"core/internal/service/user"
@@ -16,12 +19,7 @@ type authService struct {
 }
 
 type AuthService interface {
-	Login(ctx context.Context, authType string, payload LoginPayload) (string, error)
-}
-
-type LoginPayload struct {
-	Email    string
-	Password string
+	Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (string, error)
 }
 
 func NewAuthService(
@@ -36,7 +34,7 @@ func NewAuthService(
 	}
 }
 
-func (s *authService) emailLogin(ctx context.Context, payload LoginPayload) (string, error) {
+func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (string, error) {
 	userData, err := s.userService.GetUserByEmail(ctx, payload.Email)
 	if err != nil {
 		return "", err
@@ -55,10 +53,10 @@ func (s *authService) emailLogin(ctx context.Context, payload LoginPayload) (str
 		return "", err
 	}
 
-	sessionData, err := s.sessionRepo.CreateSession(ctx, session.SessionCreate{
+	sessionData, err := s.sessionRepo.CreateSession(ctx, sessionDto.NewSession{
 		RefreshToken: refreshToken,
-		ExpiryAt:     time.Now().Add(30 * time.Minute),
-		UserId:       int(userData.Id),
+		ExpiresAt:    time.Now().Add(30 * time.Minute),
+		UserID:       int(userData.Id),
 		UserAgent:    "someAgent",
 		IpAddress:    "127.0.0.1",
 	})
@@ -71,10 +69,10 @@ func (s *authService) emailLogin(ctx context.Context, payload LoginPayload) (str
 	return accessToken, nil
 }
 
-func (s *authService) Login(ctx context.Context, authType string, payload LoginPayload) (string, error) {
+func (s *authService) Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (string, error) {
 	switch authType {
-	case "email":
-		tokenStr, err := s.emailLogin(ctx, LoginPayload{Email: payload.Email, Password: payload.Password})
+	case authConst.EmailAuth:
+		tokenStr, err := s.emailLogin(ctx, authDto.Login{Email: payload.Email, Password: payload.Password})
 		if err != nil {
 			return "", err
 		}

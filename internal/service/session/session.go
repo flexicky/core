@@ -2,27 +2,29 @@ package session
 
 import (
 	"context"
+	sessionDto "core/internal/dto/session"
+	"core/internal/repository/session"
 	"core/internal/repository/user"
-	"time"
 )
 
-type Session struct {
-	Id           int
-	RefreshToken string
-	ExpiresAt    time.Time
-	RevokedAT    time.Time
-	LastUsedAt   time.Time
-	UserAgent    string
-	IpAddress    string
-}
 type sessionService struct {
-	userRepo user.UserRepository
+	userRepo    user.UserRepository
+	sessionRepo session.SessionRepo
 }
 
 type SessionService interface {
-	CreateSession(ctx context.Context, userId int) (string, error)
+	CreateSession(ctx context.Context, params sessionDto.NewSession) (*sessionDto.Session, error)
 }
 
-func NewSessionService(userRepo user.UserRepository) SessionService {
-	return &sessionService{userRepo: userRepo}
+func NewSessionService(userRepo user.UserRepository, sessionRepo session.SessionRepo) SessionService {
+	return &sessionService{userRepo: userRepo, sessionRepo: sessionRepo}
+}
+
+func (s *sessionService) CreateSession(ctx context.Context, params sessionDto.NewSession) (*sessionDto.Session, error) {
+	sessionData, err := s.sessionRepo.CreateSession(ctx, params)
+	if err != nil {
+		return &sessionDto.Session{}, err
+	}
+
+	return sessionData, nil
 }

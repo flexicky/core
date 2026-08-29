@@ -3,10 +3,17 @@ package grpcapp
 import (
 	"context"
 	authgrpc "core/internal/grpc/auth"
+	"core/internal/repository/session"
 	"core/internal/repository/user"
-	"core/internal/service"
+	"core/internal/service/auth"
+	sessionServ "core/internal/service/session"
+	"core/internal/service/token"
+	userServ "core/internal/service/user"
 	"core/internal/storage"
+	"crypto/ed25519"
+	"crypto/rand"
 	"fmt"
+	"log"
 	"log/slog"
 	"net"
 
@@ -27,7 +34,18 @@ func New(
 	gRPCServer := grpc.NewServer()
 
 	userRepository := user.NewUserRepo(&pgStorage)
-	userService := service.NewUserService(userRepository)
+	userService := userServ.NewUserService(userRepository)
+	sessionRepository := session.NewSessionRepo(&pgStorage)
+	sessionService := sessionServ.NewSessionService(userRepository, sessionRepository)
+
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		log.Fatalf("error generate private/public keys: %v", err)
+	}
+
+	tokenService := token.NewTokenService(privateKey)
+
+	authService := auth.NewAuthService(userService, tokenService, sessionService)
 
 	authgrpc.RegisterServerAPI(gRPCServer, userService)
 

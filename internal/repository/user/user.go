@@ -2,36 +2,14 @@ package user
 
 import (
 	"context"
+	userDto "core/internal/dto/user"
 	postgreStorage "core/internal/storage"
-	"time"
 )
 
-type User struct {
-	Id               int64
-	Name             string
-	Email            string
-	TelegramId       string
-	TelegramUsername string
-	MaxId            string
-	MaxUsername      string
-	CreatedAt        time.Time
-	Password         string
-}
-
-type UserCreateParams struct {
-	Name             string `validate:"omitempty,min=1,max=50"`
-	Email            string `validate:"email, omitempty,min=5,max=100"`
-	TelegramId       string
-	TelegramUsername string
-	MaxId            string
-	MaxUsername      string
-	Password         string `validate:"omitempty,min=6,max=200"`
-}
-
 type UserRepository interface {
-	Create(ctx context.Context, params UserCreateParams) (*User, error)
-	GetUserById(ctx context.Context, userId int) (*User, error)
-	GetUserByEmail(ctx context.Context, email string) (*User, error)
+	Create(ctx context.Context, params userDto.NewUser) (*userDto.User, error)
+	GetUserById(ctx context.Context, userId int) (*userDto.User, error)
+	GetUserByEmail(ctx context.Context, email string) (*userDto.User, error)
 }
 
 type userRepo struct {
@@ -49,14 +27,14 @@ func nilStringOrNil(s string) any {
 	return s
 }
 
-func (r *userRepo) Create(ctx context.Context, params UserCreateParams) (*User, error) {
+func (r *userRepo) Create(ctx context.Context, params userDto.NewUser) (*userDto.User, error) {
 	const query = `
 		INSERT INTO users (name, email, pass, telegram_id, telegram_username, max_id, max_username)
 		VALUES($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, created_at, pass
 	`
 
-	user := &User{
+	user := &userDto.User{
 		Name:             params.Name,
 		Email:            params.Email,
 		TelegramId:       params.TelegramId,
@@ -81,10 +59,10 @@ func (r *userRepo) Create(ctx context.Context, params UserCreateParams) (*User, 
 	return user, nil
 }
 
-func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (*userDto.User, error) {
 	query := `SELECT * FROM users WHERE email = $1`
 
-	user := &User{}
+	user := &userDto.User{}
 
 	err := r.pool.Pool().QueryRow(ctx, query, email).Scan(&user.Id, &user.Name, &user.Email, &user.CreatedAt)
 	if err != nil {
@@ -94,10 +72,10 @@ func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (*User, err
 	return user, nil
 }
 
-func (r *userRepo) GetUserById(ctx context.Context, userId int) (*User, error) {
+func (r *userRepo) GetUserById(ctx context.Context, userId int) (*userDto.User, error) {
 	query := `SELECT * FROM users WHERE id = $1`
 
-	user := &User{}
+	user := &userDto.User{}
 
 	err := r.pool.Pool().QueryRow(ctx, query, userId).Scan(&user.Id, &user.Name, &user.Email, &user.CreatedAt)
 	if err != nil {
