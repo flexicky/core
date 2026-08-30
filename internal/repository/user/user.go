@@ -4,6 +4,7 @@ import (
 	"context"
 	userDto "core/internal/dto/user"
 	postgreStorage "core/internal/storage"
+	"fmt"
 )
 
 type UserRepository interface {
@@ -35,22 +36,22 @@ func (r *userRepo) Create(ctx context.Context, params userDto.NewUser) (*userDto
 	`
 
 	user := &userDto.User{
-		Name:             params.Name,
-		Email:            params.Email,
-		TelegramId:       params.TelegramId,
-		TelegramUsername: params.TelegramUsername,
-		MaxId:            params.MaxId,
-		MaxUsername:      params.MaxUsername,
+		Name:             &params.Name,
+		Email:            &params.Email,
+		TelegramId:       &params.TelegramId,
+		TelegramUsername: &params.TelegramUsername,
+		MaxId:            &params.MaxId,
+		MaxUsername:      &params.MaxUsername,
 	}
 
 	err := r.pool.Pool().QueryRow(ctx, query,
-		nilStringOrNil(user.Name),
-		nilStringOrNil(user.Email),
+		nilStringOrNil(*user.Name),
+		nilStringOrNil(*user.Email),
 		nilStringOrNil(params.Password),
-		nilStringOrNil(user.TelegramId),
-		nilStringOrNil(user.TelegramUsername),
-		nilStringOrNil(user.MaxId),
-		nilStringOrNil(user.MaxUsername),
+		nilStringOrNil(*user.TelegramId),
+		nilStringOrNil(*user.TelegramUsername),
+		nilStringOrNil(*user.MaxId),
+		nilStringOrNil(*user.MaxUsername),
 	).Scan(&user.Id, &user.CreatedAt, &user.Password)
 	if err != nil {
 		return nil, err
@@ -60,12 +61,27 @@ func (r *userRepo) Create(ctx context.Context, params userDto.NewUser) (*userDto
 }
 
 func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (*userDto.User, error) {
-	query := `SELECT * FROM users WHERE email = $1`
+	query := `
+    SELECT *
+    FROM users
+    WHERE email = $1
+`
 
 	user := &userDto.User{}
 
-	err := r.pool.Pool().QueryRow(ctx, query, email).Scan(&user.Id, &user.Name, &user.Email, &user.CreatedAt)
+	err := r.pool.Pool().QueryRow(ctx, query, email).Scan(&user.Id,
+		&user.Name,
+		&user.Email,
+		&user.Password,
+		&user.TelegramId,
+		&user.TelegramUsername,
+		&user.MaxId,
+		&user.MaxUsername,
+		&user.CreatedAt,
+	)
 	if err != nil {
+
+		fmt.Println("err seelcted ", err)
 		return nil, err
 	}
 

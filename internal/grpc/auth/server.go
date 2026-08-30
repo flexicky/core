@@ -2,10 +2,12 @@ package auth
 
 import (
 	"context"
+	auth2 "core/internal/const/auth"
+	authDto "core/internal/dto/auth"
 	userDto "core/internal/dto/user"
-	userRepo "core/internal/repository/user"
 	"core/internal/service/auth"
 	"core/internal/service/user"
+	"fmt"
 
 	corev1 "github.com/flexicky/protos/gen/go/proto/core"
 	"google.golang.org/grpc"
@@ -15,12 +17,12 @@ type serverApi struct {
 	corev1.UnimplementedAuthServer
 	userService user.UserSercive
 	authService auth.AuthService
-	userRepo    userRepo.UserRepository
 }
 
-func RegisterServerAPI(gRPC *grpc.Server, userService user.UserSercive) {
+func RegisterServerAPI(gRPC *grpc.Server, userService user.UserSercive, authService auth.AuthService) {
 	corev1.RegisterAuthServer(gRPC, &serverApi{
 		userService: userService,
+		authService: authService,
 	})
 }
 
@@ -29,8 +31,16 @@ func (s *serverApi) Login(
 	req *corev1.LoginRequest,
 ) (*corev1.LoginResponse, error) {
 
+	params := authDto.Login{Email: req.Email, Password: req.Password}
+
+	resutl, err := s.authService.Login(ctx, auth2.EmailAuth, params)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+
 	return &corev1.LoginResponse{
-		Token: req.GetEmail(),
+		Token: resutl,
 	}, nil
 }
 

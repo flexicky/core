@@ -9,6 +9,7 @@ import (
 	"core/internal/service/token"
 	"core/internal/service/user"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -24,27 +25,28 @@ type AuthService interface {
 
 func NewAuthService(
 	userServ user.UserSercive,
-	tokenServ token.TokenService,
+	tokenServ *token.TokenService,
 	sessionRepo session.SessionRepo,
 ) AuthService {
 	return &authService{
 		userService:  userServ,
-		tokenService: tokenServ,
+		tokenService: *tokenServ,
 		sessionRepo:  sessionRepo,
 	}
 }
 
 func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (string, error) {
 	userData, err := s.userService.GetUserByEmail(ctx, payload.Email)
+	fmt.Println(userData)
 	if err != nil {
 		return "", err
 	}
 
-	if s.userService.CheckPasswordHash(payload.Password, userData.Password) {
+	if !s.userService.CheckPasswordHash(payload.Password, *userData.Password) {
 		return "", errors.New("invalid password")
 	}
 
-	if userData.Email != payload.Email {
+	if *userData.Email != payload.Email {
 		return "", errors.New("email does not match")
 	}
 

@@ -37,9 +37,14 @@ func (s *TokenService) CreateAccessToken(userId, sessionId int) (string, error) 
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 
-	return token.SignedString(s.privateKey)
+	signedToken, err := token.SignedString(s.privateKey)
+	if err != nil {
+		return "", err
+	}
+
+	return signedToken, nil
 }
 
 func (s *TokenService) CreateRefreshToken() (token string, hash string, err error) {

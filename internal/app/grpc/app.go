@@ -2,6 +2,7 @@ package grpcapp
 
 import (
 	"context"
+	"core/internal/app/validator"
 	authgrpc "core/internal/grpc/auth"
 	"core/internal/repository/session"
 	"core/internal/repository/user"
@@ -24,6 +25,7 @@ type App struct {
 	log        *slog.Logger
 	gRPCServer *grpc.Server
 	port       int
+	validator  *validator.Validator
 }
 
 func New(
@@ -47,7 +49,7 @@ func New(
 
 	authService := auth.NewAuthService(userService, tokenService, sessionService)
 
-	authgrpc.RegisterServerAPI(gRPCServer, userService)
+	authgrpc.RegisterServerAPI(gRPCServer, userService, authService)
 
 	return &App{
 		log:        Log,
