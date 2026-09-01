@@ -4,6 +4,7 @@ import (
 	"context"
 	"core/internal/app/validator"
 	authgrpc "core/internal/grpc/auth"
+	"core/internal/middleware/jwt"
 	"core/internal/repository/session"
 	"core/internal/repository/user"
 	"core/internal/service/auth"
@@ -33,21 +34,30 @@ func New(
 	port int,
 	pgStorage storage.Storage,
 ) (*App, error) {
-	gRPCServer := grpc.NewServer()
-
 	userRepository := user.NewUserRepo(&pgStorage)
 	userService := userServ.NewUserService(userRepository)
 	sessionRepository := session.NewSessionRepo(&pgStorage)
 	sessionService := sessionServ.NewSessionService(userRepository, sessionRepository)
 
-	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		log.Fatalf("error generate private/public keys: %v", err)
 	}
 
-	tokenService := token.NewTokenService(privateKey)
+	tokenService := token.NewTokenService(privateKey, publicKey)
 
 	authService := auth.NewAuthService(userService, tokenService, sessionService)
+
+	whiteList := []string{
+		"/auth.Auth/Login",
+		"/auth.Auth/Register",
+	}
+
+	jwtMiddleware := jwt.NewJWTMiddleware(tokenService, whiteList...)
+
+	gRPCServer := grpc.NewServer(
+		grpc.UnaryInterceptor(jwtMiddleware.JWTInterceptor()),
+	)
 
 	authgrpc.RegisterServerAPI(gRPCServer, userService, authService)
 
