@@ -1,33 +1,31 @@
 package token
 
 import (
+	tokenDto "core/internal/dto/token"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type Claims struct {
-	SessionId string `json:"session_id"`
-	jwt.RegisteredClaims
-}
-
 type TokenService struct {
 	privateKey ed25519.PrivateKey
+	publicKey  ed25519.PublicKey
 }
 
-func NewTokenService(privateKey ed25519.PrivateKey) *TokenService {
-	return &TokenService{privateKey: privateKey}
+func NewTokenService(privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey) *TokenService {
+	return &TokenService{privateKey: privateKey, publicKey: publicKey}
 }
 
 func (s *TokenService) CreateAccessToken(userId, sessionId int) (string, error) {
 	now := time.Now()
 
-	claims := &Claims{
+	claims := &tokenDto.Claims{
 		SessionId: strconv.Itoa(sessionId),
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   strconv.Itoa(userId),
@@ -61,4 +59,22 @@ func (s *TokenService) CreateRefreshToken() (token string, hash string, err erro
 	hash = base64.RawURLEncoding.EncodeToString(hashBytes[:])
 
 	return token, hash, nil
+}
+
+func (s *TokenService) ParseAccessToken(token string) (*tokenDto.Claims, error) {
+	claims := &tokenDto.Claims{}
+	tkn, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (any, error) {
+		if token.Method != jwt.SigningMethodEdDSA {
+			return nil, errors.New("unexpected signing method")
+		}
+		return s.publicKey, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !tkn.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	return claims, nil
 }

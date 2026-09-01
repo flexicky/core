@@ -12,10 +12,6 @@ import (
 	"time"
 )
 
-// TODO crate database core
-// TODO gracefullShotdown make
-// TODO create migrations
-
 func main() {
 	cfg := config.MustLoad()
 
