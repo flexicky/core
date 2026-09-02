@@ -17,7 +17,7 @@ type RedisConfig struct {
 }
 
 type RedisAdapter struct {
-	client *redis.Client
+	Client *redis.Client
 	log    *slog.Logger
 }
 
@@ -50,14 +50,14 @@ func NewRedisAdapter(cfg RedisConfig, log *slog.Logger) (*RedisAdapter, error) {
 	}
 
 	return &RedisAdapter{
-		client: redisConnection,
+		Client: redisConnection,
 		log:    log,
 	}, nil
 }
 
 func (r *RedisAdapter) Stop() error {
-	if r.client != nil {
-		return r.client.Close()
+	if r.Client != nil {
+		return r.Client.Close()
 	}
 	return nil
 }
