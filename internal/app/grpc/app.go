@@ -8,6 +8,7 @@ import (
 	"core/internal/repository/session"
 	"core/internal/repository/user"
 	"core/internal/service/auth"
+	redisServ "core/internal/service/redis"
 	sessionServ "core/internal/service/session"
 	"core/internal/service/token"
 	userServ "core/internal/service/user"
@@ -19,6 +20,7 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 )
 
@@ -33,6 +35,7 @@ func New(
 	Log *slog.Logger,
 	port int,
 	pgStorage storage.Storage,
+	adapter redis.Client,
 ) (*App, error) {
 	userRepository := user.NewUserRepo(&pgStorage)
 	userService := userServ.NewUserService(userRepository)
@@ -46,7 +49,9 @@ func New(
 
 	tokenService := token.NewTokenService(privateKey, publicKey)
 
-	authService := auth.NewAuthService(userService, tokenService, sessionService)
+	redisService := redisServ.NewRedisService(adapter)
+
+	authService := auth.NewAuthService(userService, tokenService, sessionService, redisService)
 
 	whiteList := []string{
 		"/auth.Auth/Login",

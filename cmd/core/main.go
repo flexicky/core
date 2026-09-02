@@ -4,6 +4,7 @@ import (
 	"context"
 	"core/internal/app"
 	"core/internal/config"
+	redisAdapter "core/internal/redis"
 	"core/internal/storage"
 	"log/slog"
 	"os"
@@ -30,6 +31,10 @@ func main() {
 		Port:     cfg.DB.Port,
 		SSLMode:  cfg.DB.SslMode,
 		Name:     cfg.DB.Name,
+	}, redisAdapter.RedisConfig{
+		Host:     cfg.Redis.Host,
+		Port:     cfg.Redis.Port,
+		Password: cfg.Redis.Password,
 	})
 
 	go application.GRPCServer.MustRun()
