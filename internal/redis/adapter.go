@@ -55,6 +55,10 @@ func NewRedisAdapter(cfg RedisConfig, log *slog.Logger) (*RedisAdapter, error) {
 	}, nil
 }
 
+func (a *RedisAdapter) GetRedisClient() *redis.Client {
+	return a.Client
+}
+
 func (r *RedisAdapter) Stop() error {
 	if r.Client != nil {
 		return r.Client.Close()

@@ -2,20 +2,26 @@ package redis
 
 import (
 	"context"
-	"core/internal/redis"
+	redisAdapter "core/internal/redis"
 	"fmt"
 	"log/slog"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type App struct {
-	adapter redis.RedisAdapter
+	adapter redisAdapter.RedisAdapter
 	log     *slog.Logger
-	cfg     redis.RedisConfig
+	cfg     redisAdapter.RedisConfig
 }
 
-func New(adapter redis.RedisAdapter, log *slog.Logger, cfg redis.RedisConfig) *App {
+func New(log *slog.Logger, cfg redisAdapter.RedisConfig) *App {
+	adapter, err := redisAdapter.NewRedisAdapter(cfg, log)
+	if err != nil {
+		panic("redis init is failed" + err.Error())
+	}
 	return &App{
-		adapter: adapter,
+		adapter: *adapter,
 		log:     log,
 		cfg:     cfg,
 	}
@@ -40,4 +46,8 @@ func (a *App) Stop(ctx context.Context) error {
 		a.log.Warn("redis close timeout", "error", ctx.Err())
 		return fmt.Errorf("redis close timeout: %w", ctx.Err())
 	}
+}
+
+func (a *App) GetClient() *redis.Client {
+	return a.adapter.GetRedisClient()
 }

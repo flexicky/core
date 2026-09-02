@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     refresh_token TEXT NOT NULL UNIQUE,
     user_agent TEXT,
-    ip_address INET,
+    ip_address VARCHAR(45),
 
     expires_at TIMESTAMPTZ NOT NULL,
     revoked_at TIMESTAMPTZ,
