@@ -11,12 +11,13 @@ import (
 	"core/internal/service/token"
 	"core/internal/service/user"
 	"errors"
-	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 )
 
 type authService struct {
+	log          *slog.Logger
 	userService  user.UserSercive
 	tokenService token.TokenService
 	sessionRepo  session.SessionRepo
@@ -28,12 +29,14 @@ type AuthService interface {
 }
 
 func NewAuthService(
+	log *slog.Logger,
 	userServ user.UserSercive,
 	tokenServ *token.TokenService,
 	sessionRepo session.SessionRepo,
 	redisServ redis.RedisService,
 ) AuthService {
 	return &authService{
+		log:          log,
 		userService:  userServ,
 		tokenService: *tokenServ,
 		sessionRepo:  sessionRepo,
@@ -50,7 +53,6 @@ func (s *authService) getUserAgentFromContext(ctx context.Context) string {
 
 func (s *authService) getIPAddressFromContext(ctx context.Context) string {
 	if ip, ok := ctx.Value(grpcEnum.IPAddress).(string); ok {
-		fmt.Println(ip)
 		return ip
 	}
 	return "unknown"
@@ -58,24 +60,20 @@ func (s *authService) getIPAddressFromContext(ctx context.Context) string {
 
 func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (string, error) {
 	userData, err := s.userService.GetUserByEmail(ctx, payload.Email)
-	fmt.Println(userData)
+
 	if err != nil {
-		return "", err
+		return "", errors.New("User not found")
 	}
 
 	if !s.userService.CheckPasswordHash(payload.Password, *userData.Password) {
 		return "", errors.New("invalid password")
 	}
 
-	if *userData.Email != payload.Email {
-		return "", errors.New("email does not match")
-	}
-
 	refreshToken, _, err := s.tokenService.CreateRefreshToken()
 	if err != nil {
 		return "", err
 	}
-	fmt.Println(ctx.Value(grpcEnum.UserAgent))
+
 	sessionData, err := s.sessionRepo.CreateSession(ctx, sessionDto.NewSession{
 		RefreshToken: refreshToken,
 		ExpiresAt:    time.Now().Add(30 * time.Minute),
@@ -89,14 +87,25 @@ func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (st
 
 	accessToken, err := s.tokenService.CreateAccessToken(int(userData.Id), sessionData.Id)
 
-	sessionId := sessionData.Id
-	sessionKey := "session-" + strconv.Itoa(sessionId)
-
-	if s.redisService.Set(ctx, sessionKey, strconv.Itoa(sessionData.UserId), 20*time.Minute); err != nil {
-		return "", err
-	}
+	s.saveSessionRedisAsync(sessionData)
 
 	return accessToken, nil
+}
+
+func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		sessionKey := "session-" + strconv.Itoa(sessionData.UserId)
+
+		if err := s.redisService.Set(ctx, sessionKey, strconv.Itoa(sessionData.UserId), 20*time.Minute); err != nil {
+			s.log.Error("Redis save failed",
+				slog.String("sessionKey", sessionKey),
+				slog.String("error", err.Error()),
+			)
+		}
+	}()
 }
 
 func (s *authService) Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (string, error) {
