@@ -10,6 +10,7 @@ import (
 	"core/internal/service/redis"
 	"core/internal/service/token"
 	"core/internal/service/user"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strconv"
@@ -97,9 +98,23 @@ func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
+		redisData := map[string]interface{}{
+			"user_id":    sessionData.UserId,
+			"session_id": sessionData.Id,
+			"expires_at": sessionData.ExpiresAt,
+		}
+
+		jsonData, err := json.Marshal(redisData)
+		if err != nil {
+			s.log.Error("Failed to marshal session data",
+				slog.String("sessionId", strconv.Itoa(sessionData.Id)),
+				slog.String("error", err.Error()))
+			return
+		}
+
 		sessionKey := "session-" + strconv.Itoa(sessionData.UserId)
 
-		if err := s.redisService.Set(ctx, sessionKey, strconv.Itoa(sessionData.UserId), 20*time.Minute); err != nil {
+		if err := s.redisService.Set(ctx, sessionKey, string(jsonData), 20*time.Minute); err != nil {
 			s.log.Error("Redis save failed",
 				slog.String("sessionKey", sessionKey),
 				slog.String("error", err.Error()),
