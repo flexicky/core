@@ -12,6 +12,8 @@ type sessionRepo struct {
 
 type SessionRepo interface {
 	CreateSession(ctx context.Context, params session.NewSession) (*session.Session, error)
+	GetSessionById(ctx context.Context, id int) (*session.Session, error)
+	GetSessionByUserId(ctx context.Context, userId int) (*session.Session, error)
 }
 
 func NewSessionRepo(st *postgreStorage.Storage) SessionRepo {
@@ -44,4 +46,30 @@ func (r *sessionRepo) CreateSession(ctx context.Context, params session.NewSessi
 	}
 
 	return sessionData, nil
+}
+
+func (r *sessionRepo) GetSessionById(ctx context.Context, id int) (*session.Session, error) {
+	query := `SELECT * FROM sessions where id = $1`
+
+	session := &session.Session{}
+
+	err := r.pool.Pool().QueryRow(ctx, query, id).Scan(&session.Id, &session.UserId, &session.CreatedAt, &session.LastUsedAt, &session.ExpiresAt, &session.RefreshToken, &session.RevokedAt, &session.UserAgent, &session.IPAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	return session, nil
+}
+
+func (r *sessionRepo) GetSessionByUserId(ctx context.Context, userId int) (*session.Session, error) {
+	query := `SELECT * FROM sessions where user_id = $1`
+
+	session := &session.Session{}
+
+	err := r.pool.Pool().QueryRow(ctx, query, userId).Scan(&session.Id, &session.UserId, &session.CreatedAt, &session.LastUsedAt, &session.ExpiresAt, &session.RefreshToken, &session.RevokedAt, &session.UserAgent, &session.IPAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	return session, nil
 }
