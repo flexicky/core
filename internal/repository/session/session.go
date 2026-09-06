@@ -62,7 +62,7 @@ func (r *sessionRepo) GetSessionById(ctx context.Context, id int) (*session.Sess
 }
 
 func (r *sessionRepo) GetSessionByUserId(ctx context.Context, userId int) (*session.Session, error) {
-	query := `SELECT * FROM users where id = $1`
+	query := `SELECT * FROM sessions where user_id = $1`
 
 	session := &session.Session{}
 
