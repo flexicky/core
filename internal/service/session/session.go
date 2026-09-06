@@ -28,3 +28,10 @@ func (s *sessionService) CreateSession(ctx context.Context, params sessionDto.Ne
 
 	return sessionData, nil
 }
+
+func (s *sessionService) GetSessionById(ctx context.Context, id int)(*sessionDto.Session, error){
+	session, err := s.repo.GetSessionById(ctx, id)
+	if err!= nil{
+		return nil,
+	}
+}
