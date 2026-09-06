@@ -57,7 +57,6 @@ func (m *JWTMiddleware) JWTInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		ctx = context.WithValue(ctx, "session_id", claims.SessionId)
-		ctx = context.WithValue(ctx, "claims", claims)
 
 		return handler(ctx, req)
 	}

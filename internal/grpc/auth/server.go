@@ -10,7 +10,7 @@ import (
 	"core/internal/service/user"
 	"fmt"
 
-	corev1 "github.com/flexicky/protos/gen/go/proto/core"
+	corev1 "github.com/flexicky/protos/core.core.v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -56,7 +56,6 @@ func (s *serverApi) Login(
 	ctx context.Context,
 	req *corev1.LoginRequest,
 ) (*corev1.LoginResponse, error) {
-
 	params := authDto.Login{Email: req.Email, Password: req.Password}
 
 	userAgent, ipAddress := s.extractClientInfo(ctx)
@@ -64,14 +63,18 @@ func (s *serverApi) Login(
 	ctx = context.WithValue(ctx, grpcEnum.UserAgent, userAgent)
 	ctx = context.WithValue(ctx, grpcEnum.IPAddress, ipAddress)
 
-	resutl, err := s.authService.Login(ctx, auth2.EmailAuth, params)
+	accessToken, err := s.authService.Login(ctx, auth2.EmailAuth, params)
 	if err != nil {
-		fmt.Println(err)
-		return nil, err
+		errorString := err.Error()
+		return &corev1.LoginResponse{
+			Ok:      false,
+			Message: &errorString,
+		}, nil
 	}
 
 	return &corev1.LoginResponse{
-		Token: resutl,
+		Ok:          true,
+		AccessToken: &accessToken,
 	}, nil
 }
 
@@ -86,8 +89,14 @@ func (s *serverApi) Register(
 
 	user, err := s.userService.CreateUser(ctx, params)
 	if err != nil {
-		return nil, err
+		errorString := err.Error()
+		return &corev1.RegisterResponse{
+			Ok:      false,
+			Message: &errorString,
+		}, err
 	}
-
-	return &corev1.RegisterResponse{Id: user.Id}, nil
+	fmt.Print(user)
+	return &corev1.RegisterResponse{
+		Ok: true,
+	}, nil
 }

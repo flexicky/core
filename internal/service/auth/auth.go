@@ -26,7 +26,7 @@ type authService struct {
 }
 
 type AuthService interface {
-	Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (string, error)
+	Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (*authDto.LoginResult, error)
 }
 
 func NewAuthService(
@@ -59,20 +59,20 @@ func (s *authService) getIPAddressFromContext(ctx context.Context) string {
 	return "unknown"
 }
 
-func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (string, error) {
+func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (*authDto.LoginResult, error) {
 	userData, err := s.userService.GetUserByEmail(ctx, payload.Email)
 
 	if err != nil {
-		return "", errors.New("User not found")
+		return nil, errors.New("User not found")
 	}
 
 	if !s.userService.CheckPasswordHash(payload.Password, *userData.Password) {
-		return "", errors.New("invalid password")
+		return nil, errors.New("invalid password")
 	}
 
 	refreshToken, _, err := s.tokenService.CreateRefreshToken()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	sessionData, err := s.sessionRepo.CreateSession(ctx, sessionDto.NewSession{
@@ -83,14 +83,19 @@ func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (st
 		IpAddress:    s.getIPAddressFromContext(ctx),
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	accessToken, err := s.tokenService.CreateAccessToken(int(userData.Id), sessionData.Id)
 
 	s.saveSessionRedisAsync(sessionData)
 
-	return accessToken, nil
+	result := &authDto.LoginResult{
+		Access_token: accessToken,
+		Expires_At:   time.Now().Add(20 * time.Minute),
+	}
+
+	return result, nil
 }
 
 func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
@@ -123,14 +128,14 @@ func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
 	}()
 }
 
-func (s *authService) Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (string, error) {
+func (s *authService) Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (*authDto.LoginResult, error) {
 	switch authType {
 	case authConst.EmailAuth:
 		tokenStr, err := s.emailLogin(ctx, authDto.Login{Email: payload.Email, Password: payload.Password})
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		return tokenStr, nil
 	}
-	return "", errors.New("invalid auth type")
+	return nil, errors.New("invalid auth type")
 }
