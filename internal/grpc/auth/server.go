@@ -74,7 +74,7 @@ func (s *serverApi) Login(
 
 	return &corev1.LoginResponse{
 		Ok:          true,
-		AccessToken: &accessToken,
+		AccessToken: &accessToken.Access_token,
 	}, nil
 }
 

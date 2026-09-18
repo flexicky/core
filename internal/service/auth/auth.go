@@ -6,8 +6,8 @@ import (
 	grpcEnum "core/internal/const/grpc"
 	authDto "core/internal/dto/auth"
 	sessionDto "core/internal/dto/session"
-	"core/internal/repository/session"
 	"core/internal/service/redis"
+	sessionServ "core/internal/service/session"
 	"core/internal/service/token"
 	"core/internal/service/user"
 	"encoding/json"
@@ -18,11 +18,11 @@ import (
 )
 
 type authService struct {
-	log          *slog.Logger
-	userService  user.UserSercive
-	tokenService token.TokenService
-	sessionRepo  session.SessionRepo
-	redisService redis.RedisService
+	log            *slog.Logger
+	userService    user.UserSercive
+	tokenService   token.TokenService
+	sessionService sessionServ.SessionService
+	redisService   redis.RedisService
 }
 
 type AuthService interface {
@@ -33,15 +33,15 @@ func NewAuthService(
 	log *slog.Logger,
 	userServ user.UserSercive,
 	tokenServ *token.TokenService,
-	sessionRepo session.SessionRepo,
+	sessionService sessionServ.SessionService,
 	redisServ redis.RedisService,
 ) AuthService {
 	return &authService{
-		log:          log,
-		userService:  userServ,
-		tokenService: *tokenServ,
-		sessionRepo:  sessionRepo,
-		redisService: redisServ,
+		log:            log,
+		userService:    userServ,
+		tokenService:   *tokenServ,
+		sessionService: sessionService,
+		redisService:   redisServ,
 	}
 }
 
@@ -75,7 +75,7 @@ func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (*a
 		return nil, err
 	}
 
-	sessionData, err := s.sessionRepo.CreateSession(ctx, sessionDto.NewSession{
+	sessionData, err := s.sessionService.CreateSession(ctx, sessionDto.NewSession{
 		RefreshToken: refreshToken,
 		ExpiresAt:    time.Now().Add(30 * time.Minute),
 		UserID:       int(userData.Id),
@@ -86,7 +86,7 @@ func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (*a
 		return nil, err
 	}
 
-		accessToken, err := s.tokenService.CreateAccessToken(int(userData.Id), sessionData.Id)
+	accessToken, err := s.tokenService.CreateAccessToken(int(userData.Id), sessionData.Id)
 
 	s.saveSessionRedisAsync(sessionData)
 
