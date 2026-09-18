@@ -52,7 +52,6 @@ func New(
 	redisService := redisServ.NewRedisService(adapter)
 
 	authService := auth.NewAuthService(Log, userService, tokenService, sessionService, redisService)
-
 	whiteList := []string{
 		"/auth.Auth/Login",
 		"/auth.Auth/Register",

@@ -86,7 +86,7 @@ func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (*a
 		return nil, err
 	}
 
-	accessToken, err := s.tokenService.CreateAccessToken(int(userData.Id), sessionData.Id)
+		accessToken, err := s.tokenService.CreateAccessToken(int(userData.Id), sessionData.Id)
 
 	s.saveSessionRedisAsync(sessionData)
 
