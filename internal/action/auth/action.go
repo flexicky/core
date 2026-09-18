@@ -2,16 +2,31 @@ package auth
 
 import (
 	"context"
-	"core/internal/dto/auth"
+	authType "core/internal/const/auth"
+	authDto "core/internal/dto/auth"
 	authService "core/internal/service/auth"
-	userService "core/internal/service/user"
+	"fmt"
 )
 
 type authAction struct {
 	authServ authService.AuthService
-	userServ userService.UserSercive
 }
 
-type AuthService interface {
-	Run(ctx context.Context, loginParams auth.Login)
+type AuthAction interface {
+	Run(ctx context.Context, loginParams authDto.Login) (*authDto.LoginResult, error)
+}
+
+func NewAuthAction(authServ authService.AuthService) AuthAction {
+	return &authAction{
+		authServ: authServ,
+	}
+}
+
+func (a *authAction) Run(ctx context.Context, loginParams authDto.Login) (*authDto.LoginResult, error) {
+	result, err := a.authServ.Login(ctx, authType.EmailAuth, loginParams)
+	if err != nil {
+		return nil, fmt.Errorf("auth failed %w", err)
+	}
+
+	return result, nil
 }

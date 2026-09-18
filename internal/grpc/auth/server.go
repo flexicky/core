@@ -2,54 +2,32 @@ package auth
 
 import (
 	"context"
-	auth2 "core/internal/const/auth"
+	authAction "core/internal/action/auth"
 	grpcEnum "core/internal/const/grpc"
 	authDto "core/internal/dto/auth"
 	userDto "core/internal/dto/user"
 	"core/internal/service/auth"
 	"core/internal/service/user"
+	"core/internal/utils"
 	"fmt"
 
 	corev1 "github.com/flexicky/protos/core.core.v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
 
 type serverApi struct {
 	corev1.UnimplementedAuthServer
 	userService user.UserSercive
 	authService auth.AuthService
+	authAction  authAction.AuthAction
 }
 
-func RegisterServerAPI(gRPC *grpc.Server, userService user.UserSercive, authService auth.AuthService) {
+func RegisterServerAPI(gRPC *grpc.Server, userService user.UserSercive, authService auth.AuthService, authAction authAction.AuthAction) {
 	corev1.RegisterAuthServer(gRPC, &serverApi{
 		userService: userService,
 		authService: authService,
+		authAction:  authAction,
 	})
-}
-
-func (s *serverApi) extractClientInfo(ctx context.Context) (userAgent string, ipAddress string) {
-	md, ok := metadata.FromIncomingContext(ctx)
-
-	if !ok {
-		return "unknown", "unknown"
-	}
-
-	if userAgents := md.Get("user-agent"); len(userAgents) > 0 {
-		userAgent = userAgents[0]
-	} else {
-		userAgent = "unknown"
-	}
-
-	if ips := md.Get("x-forwarded-for"); len(ips) > 0 {
-		ipAddress = ips[0]
-	} else if ips := md.Get("x-real-ip"); len(ips) > 0 {
-		ipAddress = ips[0]
-	} else {
-		ipAddress = "unknown"
-	}
-
-	return userAgent, ipAddress
 }
 
 func (s *serverApi) Login(
@@ -58,12 +36,12 @@ func (s *serverApi) Login(
 ) (*corev1.LoginResponse, error) {
 	params := authDto.Login{Email: req.Email, Password: req.Password}
 
-	userAgent, ipAddress := s.extractClientInfo(ctx)
+	userAgent, ipAddress := utils.ExtractClientInfo(ctx)
 
 	ctx = context.WithValue(ctx, grpcEnum.UserAgent, userAgent)
 	ctx = context.WithValue(ctx, grpcEnum.IPAddress, ipAddress)
 
-	accessToken, err := s.authService.Login(ctx, auth2.EmailAuth, params)
+	accessToken, err := s.authAction.Run(ctx, params)
 	if err != nil {
 		errorString := err.Error()
 		return &corev1.LoginResponse{

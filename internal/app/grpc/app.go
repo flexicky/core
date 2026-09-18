@@ -2,6 +2,7 @@ package grpcapp
 
 import (
 	"context"
+	authAction "core/internal/action/auth"
 	"core/internal/app/validator"
 	authgrpc "core/internal/grpc/auth"
 	"core/internal/middleware/jwt"
@@ -52,6 +53,9 @@ func New(
 	redisService := redisServ.NewRedisService(adapter)
 
 	authService := auth.NewAuthService(Log, userService, tokenService, sessionService, redisService)
+
+	authAction := authAction.NewAuthAction(authService)
+
 	whiteList := []string{
 		"/auth.Auth/Login",
 		"/auth.Auth/Register",
@@ -63,7 +67,7 @@ func New(
 		grpc.UnaryInterceptor(jwtMiddleware.JWTInterceptor()),
 	)
 
-	authgrpc.RegisterServerAPI(gRPCServer, userService, authService)
+	authgrpc.RegisterServerAPI(gRPCServer, userService, authService, authAction)
 
 	return &App{
 		log:        Log,
