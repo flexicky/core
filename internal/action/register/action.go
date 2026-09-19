@@ -40,9 +40,8 @@ func (a *registrerAction) Run(ctx context.Context, params userDto.NewUser) *core
 		msg := err.Error()
 		dto.Ok = false
 		dto.Message = &msg
-		go func() {
-			a.log.Error("Ошибка на строне Сервера", "error", err)
-		}()
+		a.log.Error("Ошибка на строне Сервера", "error", err)
+		return dto
 	}
 
 	authResult, err := a.authService.Login(
@@ -57,9 +56,9 @@ func (a *registrerAction) Run(ctx context.Context, params userDto.NewUser) *core
 		msg := err.Error()
 		dto.Ok = false
 		dto.Message = &msg
-		go func() {
-			a.log.Error("Auth failed", "error", err)
-		}()
+		a.log.Error("Auth failed", "error", err)
+
+		return dto
 	}
 
 	dto.Ok = true
@@ -68,8 +67,11 @@ func (a *registrerAction) Run(ctx context.Context, params userDto.NewUser) *core
 	accessToken := authResult.Access_token
 	exp := authResult.Expires_At
 
-	dto.LoginData.AccessToken = &accessToken
-	dto.LoginData.ExpiresIn = exp.Unix()
+	dto.LoginData = &corev1.LoginResponse{
+		AccessToken: &accessToken,
+		ExpiresIn:   exp.Unix(),
+		Ok:          true,
+	}
 
 	return dto
 }

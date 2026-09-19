@@ -52,7 +52,7 @@ func New(
 	tokenService := token.NewTokenService(privateKey, publicKey)
 	redisService := redisServ.NewRedisService(adapter)
 	authService := auth.NewAuthService(Log, userService, tokenService, sessionService, redisService)
-	authAction := authAction.NewAuthAction(authService)
+	authAction := authAction.NewAuthAction(Log, authService)
 	registerAction := register.NewRegisterAction(Log, userService, authService)
 
 	whiteList := []string{
