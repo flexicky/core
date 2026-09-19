@@ -4,6 +4,7 @@ import (
 	"context"
 	"core/internal/dto/session"
 	postgreStorage "core/internal/storage"
+	"time"
 )
 
 type sessionRepo struct {
@@ -14,6 +15,8 @@ type SessionRepo interface {
 	CreateSession(ctx context.Context, params session.NewSession) (*session.Session, error)
 	GetSessionById(ctx context.Context, id int) (*session.Session, error)
 	GetSessionByUserId(ctx context.Context, userId int) (*session.Session, error)
+	GetSessionByExpiresAt(ctx context.Context, exp time.Time) ([]int64, error)
+	RevokeSessionByUserId(ctx context.Context, userId int) error
 }
 
 func NewSessionRepo(st *postgreStorage.Storage) SessionRepo {
@@ -74,8 +77,8 @@ func (r *sessionRepo) GetSessionByUserId(ctx context.Context, userId int) (*sess
 	return session, nil
 }
 
-func (r *sessionRepo) GetSessionByExpiresAt(ctx context.Context, exp int64) ([]int64, error) {
-	query := `SELECT id FROM sessions WHERE expires_at > $1`
+func (r *sessionRepo) GetSessionByExpiresAt(ctx context.Context, exp time.Time) ([]int64, error) {
+	query := `SELECT id FROM sessions WHERE expires_at < $1`
 
 	rows, err := r.pool.Pool().Query(ctx, query, exp)
 	if err != nil {

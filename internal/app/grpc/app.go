@@ -15,12 +15,14 @@ import (
 	"core/internal/service/token"
 	userServ "core/internal/service/user"
 	"core/internal/storage"
+	"core/internal/worker/session_cleaner"
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
 	"log"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -67,6 +69,12 @@ func New(
 	)
 
 	authgrpc.RegisterServerAPI(gRPCServer, authAction, registerAction)
+
+	cleanSessionWorker := session_cleaner.NewProcess(Log, 10, 10*time.Second, sessionService)
+
+	ctx := context.Background()
+
+	go cleanSessionWorker.Run(ctx)
 
 	return &App{
 		log:        Log,

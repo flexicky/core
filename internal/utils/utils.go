@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"time"
 
 	"google.golang.org/grpc/metadata"
 )
@@ -28,4 +29,38 @@ func ExtractClientInfo(ctx context.Context) (userAgent string, ipAddress string)
 	}
 
 	return userAgent, ipAddress
+}
+
+func Process(ctx context.Context, timeSleep time.Duration, maxRetries int, fn func(ctx context.Context)) {
+	if timeSleep == 0 {
+		timeSleep = time.Second
+	}
+
+	ticker := time.NewTicker(timeSleep)
+	defer ticker.Stop()
+
+	run := func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// TODO позже придумавть как отлавливать в логи или пробрасывать
+			}
+		}()
+		fn(ctx)
+	}
+
+	run()
+	retries := 1
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if maxRetries > 0 && retries >= maxRetries {
+				return
+			}
+			run()
+			retries++
+		}
+	}
 }
