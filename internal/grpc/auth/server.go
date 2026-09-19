@@ -38,19 +38,7 @@ func (s *serverApi) Login(
 	ctx = context.WithValue(ctx, grpcEnum.UserAgent, userAgent)
 	ctx = context.WithValue(ctx, grpcEnum.IPAddress, ipAddress)
 
-	accessToken, err := s.authAction.Run(ctx, params)
-	if err != nil {
-		errorString := err.Error()
-		return &corev1.LoginResponse{
-			Ok:      false,
-			Message: &errorString,
-		}, nil
-	}
-
-	return &corev1.LoginResponse{
-		Ok:          true,
-		AccessToken: &accessToken.Access_token,
-	}, nil
+	return s.authAction.Run(ctx, params), nil
 }
 
 func (s *serverApi) Register(
