@@ -3,13 +3,11 @@ package auth
 import (
 	"context"
 	authAction "core/internal/action/auth"
+	"core/internal/action/register"
 	grpcEnum "core/internal/const/grpc"
 	authDto "core/internal/dto/auth"
 	userDto "core/internal/dto/user"
-	"core/internal/service/auth"
-	"core/internal/service/user"
 	"core/internal/utils"
-	"fmt"
 
 	corev1 "github.com/flexicky/protos/core.core.v1"
 	"google.golang.org/grpc"
@@ -17,16 +15,15 @@ import (
 
 type serverApi struct {
 	corev1.UnimplementedAuthServer
-	userService user.UserSercive
-	authService auth.AuthService
-	authAction  authAction.AuthAction
+	authAction     authAction.AuthAction
+	registerAction register.RegisterAction
 }
 
-func RegisterServerAPI(gRPC *grpc.Server, userService user.UserSercive, authService auth.AuthService, authAction authAction.AuthAction) {
+func RegisterServerAPI(gRPC *grpc.Server, authAction authAction.AuthAction, registerAction register.RegisterAction) {
 	corev1.RegisterAuthServer(gRPC, &serverApi{
-		userService: userService,
-		authService: authService,
-		authAction:  authAction,
+
+		authAction:     authAction,
+		registerAction: registerAction,
 	})
 }
 
@@ -65,16 +62,6 @@ func (s *serverApi) Register(
 		Password: req.GetPassword(),
 	}
 
-	user, err := s.userService.CreateUser(ctx, params)
-	if err != nil {
-		errorString := err.Error()
-		return &corev1.RegisterResponse{
-			Ok:      false,
-			Message: &errorString,
-		}, err
-	}
-	fmt.Print(user)
-	return &corev1.RegisterResponse{
-		Ok: true,
-	}, nil
+	return s.registerAction.Run(ctx, params), nil
+
 }
