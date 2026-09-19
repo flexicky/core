@@ -73,3 +73,36 @@ func (r *sessionRepo) GetSessionByUserId(ctx context.Context, userId int) (*sess
 
 	return session, nil
 }
+
+func (r *sessionRepo) GetSessionByExpiresAt(ctx context.Context, exp int64) ([]int64, error) {
+	query := `SELECT id FROM sessions WHERE expires_at > $1`
+
+	rows, err := r.pool.Pool().Query(ctx, query, exp)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+
+	for rows.Next() {
+		var id int64
+
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+
+		ids = append(ids, id)
+	}
+
+	return ids, nil
+}
+
+func (r *sessionRepo) RevokeSessionByUserId(ctx context.Context, userId int) error {
+	query := `DELETE FROM sessions WHERE user_id = $1`
+	_, err := r.pool.Pool().Exec(ctx, query, userId)
+	if err != nil {
+		return err
+	}
+	return nil
+}
