@@ -4,6 +4,7 @@ import (
 	"context"
 	"core/internal/dto/session"
 	postgreStorage "core/internal/storage"
+	"time"
 )
 
 type sessionRepo struct {
@@ -14,6 +15,8 @@ type SessionRepo interface {
 	CreateSession(ctx context.Context, params session.NewSession) (*session.Session, error)
 	GetSessionById(ctx context.Context, id int) (*session.Session, error)
 	GetSessionByUserId(ctx context.Context, userId int) (*session.Session, error)
+	GetSessionByExpiresAt(ctx context.Context, exp time.Time) ([]int64, error)
+	RevokeSessionByUserId(ctx context.Context, userId int) error
 }
 
 func NewSessionRepo(st *postgreStorage.Storage) SessionRepo {
@@ -72,4 +75,37 @@ func (r *sessionRepo) GetSessionByUserId(ctx context.Context, userId int) (*sess
 	}
 
 	return session, nil
+}
+
+func (r *sessionRepo) GetSessionByExpiresAt(ctx context.Context, exp time.Time) ([]int64, error) {
+	query := `SELECT id FROM sessions WHERE expires_at < $1`
+
+	rows, err := r.pool.Pool().Query(ctx, query, exp)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+
+	for rows.Next() {
+		var id int64
+
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+
+		ids = append(ids, id)
+	}
+
+	return ids, nil
+}
+
+func (r *sessionRepo) RevokeSessionByUserId(ctx context.Context, userId int) error {
+	query := `DELETE FROM sessions WHERE user_id = $1`
+	_, err := r.pool.Pool().Exec(ctx, query, userId)
+	if err != nil {
+		return err
+	}
+	return nil
 }

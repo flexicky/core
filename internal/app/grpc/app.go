@@ -2,6 +2,8 @@ package grpcapp
 
 import (
 	"context"
+	authAction "core/internal/action/auth"
+	"core/internal/action/register"
 	"core/internal/app/validator"
 	authgrpc "core/internal/grpc/auth"
 	"core/internal/middleware/jwt"
@@ -13,12 +15,14 @@ import (
 	"core/internal/service/token"
 	userServ "core/internal/service/user"
 	"core/internal/storage"
+	"core/internal/worker/session_cleaner"
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
 	"log"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -48,10 +52,10 @@ func New(
 	}
 
 	tokenService := token.NewTokenService(privateKey, publicKey)
-
 	redisService := redisServ.NewRedisService(adapter)
-
 	authService := auth.NewAuthService(Log, userService, tokenService, sessionService, redisService)
+	authAction := authAction.NewAuthAction(Log, authService)
+	registerAction := register.NewRegisterAction(Log, userService, authService)
 
 	whiteList := []string{
 		"/auth.Auth/Login",
@@ -64,7 +68,13 @@ func New(
 		grpc.UnaryInterceptor(jwtMiddleware.JWTInterceptor()),
 	)
 
-	authgrpc.RegisterServerAPI(gRPCServer, userService, authService)
+	authgrpc.RegisterServerAPI(gRPCServer, authAction, registerAction)
+
+	cleanSessionWorker := session_cleaner.NewProcess(Log, 10, 10*time.Second, sessionService)
+
+	ctx := context.Background()
+
+	go cleanSessionWorker.Run(ctx)
 
 	return &App{
 		log:        Log,

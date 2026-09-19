@@ -1,6 +1,9 @@
 package user
 
-import "time"
+import (
+	"core/internal/dto/auth"
+	"time"
+)
 
 type NewUser struct {
 	Name             string `validate:"omitempty,min=1,max=50"`
@@ -22,4 +25,9 @@ type User struct {
 	MaxUsername      *string
 	CreatedAt        time.Time
 	Password         *string
+}
+
+type RegisterResponse struct {
+	LoginResponse auth.LoginResult
+	Message       string
 }
