@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	authAction "core/internal/action/auth"
+	"core/internal/action/me"
 	"core/internal/action/register"
 	grpcEnum "core/internal/const/grpc"
 	authDto "core/internal/dto/auth"
@@ -17,13 +18,20 @@ type serverApi struct {
 	corev1.UnimplementedAuthServer
 	authAction     authAction.AuthAction
 	registerAction register.RegisterAction
+	MeAction       me.MeAction
 }
 
-func RegisterServerAPI(gRPC *grpc.Server, authAction authAction.AuthAction, registerAction register.RegisterAction) {
+func RegisterServerAPI(
+	gRPC *grpc.Server,
+	authAction authAction.AuthAction,
+	registerAction register.RegisterAction,
+	MeAction me.MeAction,
+) {
 	corev1.RegisterAuthServer(gRPC, &serverApi{
 
 		authAction:     authAction,
 		registerAction: registerAction,
+		MeAction:       MeAction,
 	})
 }
 
@@ -52,4 +60,15 @@ func (s *serverApi) Register(
 
 	return s.registerAction.Run(ctx, params), nil
 
+}
+
+func (s *serverApi) Me(
+	ctx context.Context,
+	req *corev1.MeRequest,
+) (*corev1.MeResponse, error) {
+	userAgent, ipAddress := utils.ExtractClientInfo(ctx)
+	ctx = context.WithValue(ctx, grpcEnum.UserAgent, userAgent)
+	ctx = context.WithValue(ctx, grpcEnum.IPAddress, ipAddress)
+
+	return s.MeAction.Run(ctx), nil
 }

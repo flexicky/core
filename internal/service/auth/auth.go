@@ -27,6 +27,7 @@ type authService struct {
 
 type AuthService interface {
 	Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (*authDto.LoginResult, error)
+	GetCurrentSession(ctx context.Context) (user *SessionJsonData, err error)
 }
 
 func NewAuthService(
@@ -87,6 +88,9 @@ func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (*a
 	}
 
 	accessToken, err := s.tokenService.CreateAccessToken(int(userData.Id), sessionData.Id)
+	if err != nil {
+		return nil, err
+	}
 
 	s.saveSessionRedisAsync(sessionData)
 
@@ -98,15 +102,42 @@ func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (*a
 	return result, nil
 }
 
+type SessionJsonData struct {
+	UserId           int     `json:"user_id"`
+	UserName         *string `json:"user_name"`
+	UserEmail        *string `json:"user_email"`
+	SessionId        int     `json:"session_id"`
+	ExpiresAt        int64   `json:"expires_at"`
+	UserCreatedAt    int64   `json:"user_created_at"`
+	SessionCreatedAt int64   `json:"session_created_at"`
+}
+
 func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer func() {
+			if r := recover(); r != nil {
+				s.log.Error("panic in saveSessionRedisAsync", "recover", r)
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
+		userData, err := s.userService.GetUserById(ctx, int(sessionData.UserId))
+		if err != nil {
+			s.log.Warn("Failed to get user by id", "userId", sessionData.UserId, "err", err)
+			return
+		}
+
 		redisData := map[string]interface{}{
-			"user_id":    sessionData.UserId,
-			"session_id": sessionData.Id,
-			"expires_at": sessionData.ExpiresAt,
+			"user_id":            userData.Id,
+			"session_id":         sessionData.Id,
+			"expires_at":         sessionData.ExpiresAt,
+			"session_created":    sessionData.CreatedAt,
+			"user_name":          userData.Name,
+			"user_email":         userData.Email,
+			"user_created_at":    userData.CreatedAt,
+			"session_created_at": sessionData.CreatedAt,
 		}
 
 		jsonData, err := json.Marshal(redisData)
@@ -126,6 +157,52 @@ func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
 			)
 		}
 	}()
+}
+
+func (s *authService) GetCurrentSession(ctx context.Context) (user *SessionJsonData, err error) {
+	sessionId, ok := ctx.Value("sessionId").(string)
+	if !ok {
+		return nil, errors.New("sessionId not found")
+	}
+	sessionKey := "session-" + sessionId
+	sessionData, err := s.redisService.Get(ctx, sessionKey)
+	if err != nil {
+		intSessionId, err := strconv.Atoi(sessionId)
+		if err != nil {
+			return nil, err
+		}
+		currentSession, err := s.sessionService.GetSessionById(ctx, intSessionId)
+		if err != nil {
+			return nil, err
+		}
+		currentUser, err := s.userService.GetUserById(ctx, currentSession.UserId)
+		if err != nil {
+			return nil, err
+		}
+
+		s.saveSessionRedisAsync(currentSession)
+
+		return &SessionJsonData{
+			UserId:           currentSession.UserId,
+			UserName:         currentUser.Name,
+			UserEmail:        currentUser.Email,
+			SessionId:        intSessionId,
+			ExpiresAt:        currentSession.ExpiresAt.Unix(),
+			SessionCreatedAt: currentSession.CreatedAt.Unix(),
+			UserCreatedAt:    currentUser.CreatedAt.Unix(),
+		}, nil
+	}
+
+	jsonData, err := json.Marshal(sessionData)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(jsonData, &user); err != nil {
+		return nil, err
+	}
+
+	return user, nil
 }
 
 func (s *authService) Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (*authDto.LoginResult, error) {
