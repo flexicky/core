@@ -89,7 +89,7 @@ func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (*userDto.U
 }
 
 func (r *userRepo) GetUserById(ctx context.Context, userId int) (*userDto.User, error) {
-	query := `SELECT * FROM users WHERE id = $1`
+	query := `SELECT id, name, email, created_at FROM users WHERE id = $1`
 
 	user := &userDto.User{}
 

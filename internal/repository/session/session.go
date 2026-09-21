@@ -102,7 +102,7 @@ func (r *sessionRepo) GetSessionByExpiresAt(ctx context.Context, exp time.Time) 
 }
 
 func (r *sessionRepo) RevokeSessionByUserId(ctx context.Context, userId int) error {
-	query := `DELETE FROM sessions WHERE user_id = $1`
+	query := `DELETE FROM sessions WHERE id = $1`
 	_, err := r.pool.Pool().Exec(ctx, query, userId)
 	if err != nil {
 		return err
