@@ -148,7 +148,7 @@ func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
 			return
 		}
 
-		sessionKey := "session-" + strconv.Itoa(sessionData.UserId)
+		sessionKey := "session-" + strconv.Itoa(sessionData.Id)
 
 		if err := s.redisService.Set(ctx, sessionKey, string(jsonData), 20*time.Minute); err != nil {
 			s.log.Error("Redis save failed",
@@ -160,7 +160,7 @@ func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
 }
 
 func (s *authService) GetCurrentSession(ctx context.Context) (user *SessionJsonData, err error) {
-	sessionId, ok := ctx.Value("sessionId").(string)
+	sessionId, ok := ctx.Value("session_id").(string)
 	if !ok {
 		return nil, errors.New("sessionId not found")
 	}

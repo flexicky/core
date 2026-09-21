@@ -36,7 +36,8 @@ func (p *Process) cleanSession(ctx context.Context) {
 	if len(deadSessions) > 0 {
 		for _, deadSession := range deadSessions {
 			if err := p.sessionService.DeleteSessionById(ctx, int(deadSession)); err != nil {
-				p.log.Error("DeleteSessionById", "err", err)
+				p.log.Error("Error DeleteSessionById", "err", err)
+				continue
 			}
 			p.log.Info("DeleteSessionById", "deadSession", deadSession)
 		}

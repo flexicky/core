@@ -3,6 +3,7 @@ package jwt
 import (
 	"context"
 	"core/internal/service/token"
+	"fmt"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -35,6 +36,7 @@ func (m *JWTMiddleware) JWTInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		md, ok := metadata.FromIncomingContext(ctx)
+		fmt.Println(md)
 		if !ok {
 			return nil, status.Error(codes.Unauthenticated, "missing metadata")
 		}
@@ -57,6 +59,7 @@ func (m *JWTMiddleware) JWTInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		ctx = context.WithValue(ctx, "session_id", claims.SessionId)
+		fmt.Println("interceptor done", ctx.Value("session_id"))
 
 		return handler(ctx, req)
 	}
