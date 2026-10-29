@@ -2,9 +2,10 @@ package jwt
 
 import (
 	"context"
-	"core/internal/service/token"
-	"fmt"
 	"strings"
+
+	"core/internal/ctxkeys"
+	"core/internal/service/token"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -12,55 +13,71 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type JWTMiddleware struct {
-	tokenService *token.TokenService
-	whiteList    map[string]bool
+const bearerPrefix = "Bearer "
+
+// Middleware authenticates unary gRPC calls with a bearer access token.
+type Middleware struct {
+	tokens    token.Service
+	publicRPC map[string]struct{}
 }
 
-func NewJWTMiddleware(tokenService *token.TokenService, whiteList ...string) *JWTMiddleware {
-	whiteMap := make(map[string]bool)
-	for _, method := range whiteList {
-		whiteMap[method] = true
+// New builds the interceptor. The methods listed in public are reachable
+// without a token (login, register).
+func New(tokens token.Service, public ...string) *Middleware {
+	allowed := make(map[string]struct{}, len(public))
+	for _, method := range public {
+		allowed[method] = struct{}{}
 	}
-	return &JWTMiddleware{tokenService: tokenService, whiteList: whiteMap}
+
+	return &Middleware{tokens: tokens, publicRPC: allowed}
 }
 
-func (m *JWTMiddleware) JWTInterceptor() grpc.UnaryServerInterceptor {
+// UnaryServerInterceptor rejects calls without a valid access token and stores
+// the session id from the token in the request context.
+func (m *Middleware) UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
-		req interface{},
+		req any,
 		info *grpc.UnaryServerInfo,
-		handler grpc.UnaryHandler) (interface{}, error) {
-		if m.whiteList[info.FullMethod] {
+		handler grpc.UnaryHandler,
+	) (any, error) {
+		if _, ok := m.publicRPC[info.FullMethod]; ok {
 			return handler(ctx, req)
 		}
 
-		md, ok := metadata.FromIncomingContext(ctx)
-		fmt.Println(md)
-		if !ok {
-			return nil, status.Error(codes.Unauthenticated, "missing metadata")
-		}
-
-		authHeader := md.Get("authorization")
-		if len(authHeader) == 0 {
-			return nil, status.Error(codes.Unauthenticated, "missing authorization token")
-		}
-
-		fullToken := authHeader[0]
-		if !strings.HasPrefix(fullToken, "Bearer ") {
-			return nil, status.Error(codes.Unauthenticated, "invalid authorization format")
-		}
-
-		tokenString := strings.TrimPrefix(fullToken, "Bearer ")
-
-		claims, err := m.tokenService.ParseAccessToken(tokenString)
+		sessionID, err := m.sessionIDFromContext(ctx)
 		if err != nil {
-			return nil, status.Error(codes.Unauthenticated, "invalid token")
+			return nil, err
 		}
 
-		ctx = context.WithValue(ctx, "session_id", claims.SessionId)
-		fmt.Println("interceptor done", ctx.Value("session_id"))
-
-		return handler(ctx, req)
+		return handler(ctxkeys.WithSessionID(ctx, sessionID), req)
 	}
+}
+
+func (m *Middleware) sessionIDFromContext(ctx context.Context) (string, error) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "", status.Error(codes.Unauthenticated, "missing metadata")
+	}
+
+	values := md.Get("authorization")
+	if len(values) == 0 {
+		return "", status.Error(codes.Unauthenticated, "missing authorization token")
+	}
+
+	raw := values[0]
+	if !strings.HasPrefix(raw, bearerPrefix) {
+		return "", status.Error(codes.Unauthenticated, "invalid authorization header format")
+	}
+
+	claims, err := m.tokens.ParseAccessToken(strings.TrimPrefix(raw, bearerPrefix))
+	if err != nil {
+		return "", status.Error(codes.Unauthenticated, "invalid token")
+	}
+
+	if claims.SessionID == "" {
+		return "", status.Error(codes.Unauthenticated, "token has no session")
+	}
+
+	return claims.SessionID, nil
 }

@@ -2,49 +2,42 @@ package auth
 
 import (
 	"context"
+	"log/slog"
+
+	"core/internal/apperr"
 	authType "core/internal/const/auth"
 	authDto "core/internal/dto/auth"
 	authService "core/internal/service/auth"
-	"log/slog"
+	"core/internal/utils"
 
 	corev1 "github.com/flexicky/protos/core.core.v1"
 )
 
-type authAction struct {
+type action struct {
 	log      *slog.Logger
-	authServ authService.AuthService
+	authServ authService.Service
 }
 
-type AuthAction interface {
-	Run(ctx context.Context, loginParams authDto.Login) *corev1.LoginResponse
+// Action handles the Login RPC.
+type Action interface {
+	Run(ctx context.Context, params authDto.Login) *corev1.LoginResponse
 }
 
-func NewAuthAction(log *slog.Logger, authServ authService.AuthService) AuthAction {
-	return &authAction{
-		log:      log,
-		authServ: authServ,
-	}
+func New(log *slog.Logger, authServ authService.Service) Action {
+	return &action{log: log, authServ: authServ}
 }
 
-func (a *authAction) Run(ctx context.Context, loginParams authDto.Login) *corev1.LoginResponse {
-	dto := &corev1.LoginResponse{}
-
-	result, err := a.authServ.Login(ctx, authType.EmailAuth, loginParams)
+func (a *action) Run(ctx context.Context, params authDto.Login) *corev1.LoginResponse {
+	result, err := a.authServ.Login(ctx, authType.EmailAuth, params)
 	if err != nil {
-		dto.Ok = false
-		msg := err.Error()
-		dto.Message = &msg
-		go func() {
-			a.log.Error("Auth failed", "error", err)
-		}()
+		a.log.WarnContext(ctx, "login failed", slog.String("email", params.Email), slog.Any("error", err))
+
+		return &corev1.LoginResponse{Ok: false, Message: utils.Ptr(apperr.PublicMessage(err))}
 	}
 
-	accessToken := result.Access_token
-	exp := result.Expires_At
-
-	dto.Ok = true
-	dto.AccessToken = &accessToken
-	dto.ExpiresIn = exp.Unix()
-
-	return dto
+	return &corev1.LoginResponse{
+		Ok:          true,
+		AccessToken: utils.Ptr(result.AccessToken),
+		ExpiresIn:   result.ExpiresAt.Unix(),
+	}
 }

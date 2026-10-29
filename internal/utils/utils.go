@@ -2,65 +2,47 @@ package utils
 
 import (
 	"context"
-	"time"
+
+	"core/internal/ctxkeys"
 
 	"google.golang.org/grpc/metadata"
 )
 
-func ExtractClientInfo(ctx context.Context) (userAgent string, ipAddress string) {
+const unknown = "unknown"
+
+// ClientInfoFromMetadata extracts the user agent and the client IP from the
+// incoming gRPC metadata.
+func ClientInfoFromMetadata(ctx context.Context) ctxkeys.ClientInfo {
 	md, ok := metadata.FromIncomingContext(ctx)
-
 	if !ok {
-		return "unknown", "unknown"
+		return ctxkeys.ClientInfo{UserAgent: unknown, IP: unknown}
 	}
 
-	if userAgents := md.Get("user-agent"); len(userAgents) > 0 {
-		userAgent = userAgents[0]
-	} else {
-		userAgent = "unknown"
+	return ctxkeys.ClientInfo{
+		UserAgent: firstOrUnknown(md.Get("user-agent")),
+		IP:        firstNonEmpty(md.Get("x-forwarded-for"), md.Get("x-real-ip")),
 	}
-
-	if ips := md.Get("x-forwarded-for"); len(ips) > 0 {
-		ipAddress = ips[0]
-	} else if ips := md.Get("x-real-ip"); len(ips) > 0 {
-		ipAddress = ips[0]
-	} else {
-		ipAddress = "unknown"
-	}
-
-	return userAgent, ipAddress
 }
 
-func Process(ctx context.Context, timeSleep time.Duration, maxRetries int, fn func(ctx context.Context)) {
-	if timeSleep == 0 {
-		timeSleep = time.Second
+func firstOrUnknown(values []string) string {
+	if len(values) == 0 || values[0] == "" {
+		return unknown
 	}
 
-	ticker := time.NewTicker(timeSleep)
-	defer ticker.Stop()
+	return values[0]
+}
 
-	run := func() {
-		defer func() {
-			if r := recover(); r != nil {
-				// TODO позже придумавть как отлавливать в логи или пробрасывать
-			}
-		}()
-		fn(ctx)
-	}
-
-	run()
-	retries := 1
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if maxRetries > 0 && retries >= maxRetries {
-				return
-			}
-			run()
-			retries++
+func firstNonEmpty(groups ...[]string) string {
+	for _, values := range groups {
+		if len(values) > 0 && values[0] != "" {
+			return values[0]
 		}
 	}
+
+	return unknown
+}
+
+// Ptr returns a pointer to value. It is handy for proto optional fields.
+func Ptr[T any](value T) *T {
+	return &value
 }

@@ -1,51 +1,56 @@
+// Package session_cleaner removes expired sessions from the database.
 package session_cleaner
 
 import (
 	"context"
-	sessionServ "core/internal/service/session"
-	"core/internal/utils"
 	"log/slog"
 	"time"
+
+	sessionServ "core/internal/service/session"
 )
 
+// Process periodically deletes expired sessions.
 type Process struct {
 	log            *slog.Logger
-	sessionService sessionServ.SessionService
-	MaxRetries     int
-	TimeSleep      time.Duration
+	sessionService sessionServ.Service
+	interval       time.Duration
 }
 
-func NewProcess(log *slog.Logger, maxRetr int, timeSleep time.Duration, sessionService sessionServ.SessionService) *Process {
+func NewProcess(log *slog.Logger, sessionService sessionServ.Service, interval time.Duration) *Process {
 	return &Process{
 		log:            log,
-		MaxRetries:     maxRetr,
-		TimeSleep:      timeSleep,
 		sessionService: sessionService,
+		interval:       interval,
 	}
 }
 
-func (p *Process) cleanSession(ctx context.Context) {
+// Run blocks until ctx is cancelled, cleaning up once immediately and then
+// every interval.
+func (p *Process) Run(ctx context.Context) {
+	ticker := time.NewTicker(p.interval)
+	defer ticker.Stop()
 
-	deadSessions, err := p.sessionService.GetSessionByExpiresA(ctx, time.Now())
+	p.cleanup(ctx)
 
-	if err != nil {
-		p.log.Error("GetSessionByExpiresA", "err", err)
-		return
-	}
-
-	if len(deadSessions) > 0 {
-		for _, deadSession := range deadSessions {
-			if err := p.sessionService.DeleteSessionById(ctx, int(deadSession)); err != nil {
-				p.log.Error("Error DeleteSessionById", "err", err)
-				continue
-			}
-			p.log.Info("DeleteSessionById", "deadSession", deadSession)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.cleanup(ctx)
 		}
 	}
 }
 
-func (p *Process) Run(ctx context.Context) {
-	utils.Process(ctx, p.TimeSleep, p.MaxRetries, func(ctx context.Context) {
-		p.cleanSession(ctx)
-	})
+func (p *Process) cleanup(ctx context.Context) {
+	deleted, err := p.sessionService.DeleteExpired(ctx, time.Now())
+	if err != nil {
+		p.log.ErrorContext(ctx, "delete expired sessions", slog.Any("error", err))
+
+		return
+	}
+
+	if deleted > 0 {
+		p.log.InfoContext(ctx, "expired sessions deleted", slog.Int64("count", deleted))
+	}
 }

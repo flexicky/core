@@ -2,213 +2,159 @@ package auth
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"core/internal/apperr"
 	authConst "core/internal/const/auth"
-	grpcEnum "core/internal/const/grpc"
+	"core/internal/ctxkeys"
 	authDto "core/internal/dto/auth"
 	sessionDto "core/internal/dto/session"
-	"core/internal/service/redis"
 	sessionServ "core/internal/service/session"
 	"core/internal/service/token"
-	"core/internal/service/user"
-	"encoding/json"
-	"errors"
-	"log/slog"
-	"strconv"
-	"time"
+	userServ "core/internal/service/user"
 )
 
-type authService struct {
-	log            *slog.Logger
-	userService    user.UserSercive
-	tokenService   token.TokenService
-	sessionService sessionServ.SessionService
-	redisService   redis.RedisService
-}
-
-type AuthService interface {
+// Service is the authentication domain API.
+type Service interface {
+	// Login verifies the credentials and issues an access token.
 	Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (*authDto.LoginResult, error)
-	GetCurrentSession(ctx context.Context) (user *SessionJsonData, err error)
+	// CurrentSession returns the session referenced by the access token
+	// carried in ctx.
+	CurrentSession(ctx context.Context) (*SessionData, error)
 }
 
-func NewAuthService(
+type service struct {
+	log        *slog.Logger
+	users      userServ.Service
+	tokens     token.Service
+	sessions   sessionServ.Service
+	cache      SessionCache
+	sessionTTL time.Duration
+}
+
+func New(
 	log *slog.Logger,
-	userServ user.UserSercive,
-	tokenServ *token.TokenService,
-	sessionService sessionServ.SessionService,
-	redisServ redis.RedisService,
-) AuthService {
-	return &authService{
-		log:            log,
-		userService:    userServ,
-		tokenService:   *tokenServ,
-		sessionService: sessionService,
-		redisService:   redisServ,
+	users userServ.Service,
+	tokens token.Service,
+	sessions sessionServ.Service,
+	cache SessionCache,
+	sessionTTL time.Duration,
+) Service {
+	return &service{
+		log:        log,
+		users:      users,
+		tokens:     tokens,
+		sessions:   sessions,
+		cache:      cache,
+		sessionTTL: sessionTTL,
 	}
 }
 
-func (s *authService) getUserAgentFromContext(ctx context.Context) string {
-	if userAgent, ok := ctx.Value(grpcEnum.UserAgent).(string); ok {
-		return userAgent
-	}
-	return "unknown"
-}
-
-func (s *authService) getIPAddressFromContext(ctx context.Context) string {
-	if ip, ok := ctx.Value(grpcEnum.IPAddress).(string); ok {
-		return ip
-	}
-	return "unknown"
-}
-
-func (s *authService) emailLogin(ctx context.Context, payload authDto.Login) (*authDto.LoginResult, error) {
-	userData, err := s.userService.GetUserByEmail(ctx, payload.Email)
-
-	if err != nil {
-		return nil, errors.New("User not found")
-	}
-
-	if !s.userService.CheckPasswordHash(payload.Password, *userData.Password) {
-		return nil, errors.New("invalid password")
-	}
-
-	refreshToken, _, err := s.tokenService.CreateRefreshToken()
-	if err != nil {
-		return nil, err
-	}
-
-	sessionData, err := s.sessionService.CreateSession(ctx, sessionDto.NewSession{
-		RefreshToken: refreshToken,
-		ExpiresAt:    time.Now().Add(30 * time.Minute),
-		UserID:       int(userData.Id),
-		UserAgent:    s.getUserAgentFromContext(ctx),
-		IpAddress:    s.getIPAddressFromContext(ctx),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	accessToken, err := s.tokenService.CreateAccessToken(int(userData.Id), sessionData.Id)
-	if err != nil {
-		return nil, err
-	}
-
-	s.saveSessionRedisAsync(sessionData)
-
-	result := &authDto.LoginResult{
-		Access_token: accessToken,
-		Expires_At:   time.Now().Add(20 * time.Minute),
-	}
-
-	return result, nil
-}
-
-type SessionJsonData struct {
-	UserId           int     `json:"user_id"`
-	UserName         *string `json:"user_name"`
-	UserEmail        *string `json:"user_email"`
-	SessionId        int     `json:"session_id"`
-	ExpiresAt        int64   `json:"expires_at"`
-	UserCreatedAt    int64   `json:"user_created_at"`
-	SessionCreatedAt int64   `json:"session_created_at"`
-}
-
-func (s *authService) saveSessionRedisAsync(sessionData *sessionDto.Session) {
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				s.log.Error("panic in saveSessionRedisAsync", "recover", r)
-			}
-		}()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		userData, err := s.userService.GetUserById(ctx, int(sessionData.UserId))
-		if err != nil {
-			s.log.Warn("Failed to get user by id", "userId", sessionData.UserId, "err", err)
-			return
-		}
-
-		redisData := SessionJsonData{
-			UserId:           int(userData.Id),
-			UserName:         userData.Name,
-			UserEmail:        userData.Email,
-			SessionId:        sessionData.Id,
-			ExpiresAt:        sessionData.ExpiresAt.Unix(),
-			UserCreatedAt:    userData.CreatedAt.Unix(),
-			SessionCreatedAt: sessionData.CreatedAt.Unix(),
-		}
-
-		sessionKey := "session-" + strconv.Itoa(sessionData.Id)
-
-		if err := s.redisService.Set(ctx, sessionKey, redisData, 20*time.Minute); err != nil {
-			s.log.Error("Redis save failed",
-				slog.String("sessionKey", sessionKey),
-				slog.String("error", err.Error()),
-			)
-		}
-	}()
-}
-
-func (s *authService) GetCurrentSession(ctx context.Context) (*SessionJsonData, error) {
-	sessionId, ok := ctx.Value("session_id").(string)
-	if !ok {
-		return nil, errors.New("sessionId not found")
-	}
-	sessionKey := "session-" + sessionId
-	sessionData, err := s.redisService.Get(ctx, sessionKey)
-	s.log.Debug("GetCurrentSession", "sessionKey", sessionKey)
-	if err != nil {
-		intSessionId, err := strconv.Atoi(sessionId)
-		if err != nil {
-			return nil, err
-		}
-		currentSession, err := s.sessionService.GetSessionById(ctx, intSessionId)
-		if err != nil {
-			return nil, err
-		}
-		currentUser, err := s.userService.GetUserById(ctx, currentSession.UserId)
-		if err != nil {
-			return nil, err
-		}
-
-		s.log.Debug("GetCurrentSession", "currentUser", currentUser)
-
-		s.saveSessionRedisAsync(currentSession)
-
-		return &SessionJsonData{
-			UserId:           currentSession.UserId,
-			UserName:         currentUser.Name,
-			UserEmail:        currentUser.Email,
-			SessionId:        intSessionId,
-			ExpiresAt:        currentSession.ExpiresAt.Unix(),
-			SessionCreatedAt: currentSession.CreatedAt.Unix(),
-			UserCreatedAt:    currentUser.CreatedAt.Unix(),
-		}, nil
-	}
-
-	var result SessionJsonData
-	if err := json.Unmarshal([]byte(sessionData), &result); err != nil {
-		s.log.Warn("failed to unmarshal cached session",
-			"sessionKey", sessionKey,
-			"raw", sessionData,
-			"err", err,
-		)
-		return nil, err
-	}
-
-	s.log.Debug("GetCurrentSession ok", "result", result)
-	return &result, nil
-}
-
-func (s *authService) Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (*authDto.LoginResult, error) {
+func (s *service) Login(ctx context.Context, authType authConst.AuthType, payload authDto.Login) (*authDto.LoginResult, error) {
 	switch authType {
 	case authConst.EmailAuth:
-		tokenStr, err := s.emailLogin(ctx, authDto.Login{Email: payload.Email, Password: payload.Password})
-		if err != nil {
-			return nil, err
-		}
-		return tokenStr, nil
+		return s.emailLogin(ctx, payload)
+	default:
+		return nil, apperr.ErrInvalidAuthType
 	}
-	return nil, errors.New("invalid auth type")
+}
+
+func (s *service) emailLogin(ctx context.Context, payload authDto.Login) (*authDto.LoginResult, error) {
+	const op = "auth.emailLogin"
+
+	user, err := s.users.GetByEmail(ctx, payload.Email)
+	if err != nil {
+		if errors.Is(err, apperr.ErrUserNotFound) {
+			return nil, apperr.ErrInvalidCredentials
+		}
+
+		return nil, fmt.Errorf("%s: get user: %w", op, err)
+	}
+
+	if user.Password == nil || !s.users.CheckPassword(payload.Password, *user.Password) {
+		return nil, apperr.ErrInvalidCredentials
+	}
+
+	refreshToken, _, err := s.tokens.CreateRefreshToken()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	client := ctxkeys.ClientInfoFrom(ctx)
+
+	session, err := s.sessions.Create(ctx, sessionDto.NewSession{
+		UserID:       user.ID,
+		RefreshToken: refreshToken,
+		UserAgent:    client.UserAgent,
+		IPAddress:    client.IP,
+		ExpiresAt:    time.Now().Add(s.sessionTTL),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s: create session: %w", op, err)
+	}
+
+	accessToken, expiresAt, err := s.tokens.CreateAccessToken(user.ID, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("%s: create access token: %w", op, err)
+	}
+
+	s.cache.Save(ctx, SessionDataFrom(user, session))
+
+	return &authDto.LoginResult{
+		AccessToken: accessToken,
+		ExpiresAt:   expiresAt,
+	}, nil
+}
+
+func (s *service) CurrentSession(ctx context.Context) (*SessionData, error) {
+	const op = "auth.CurrentSession"
+
+	sessionID, ok := ctxkeys.SessionID(ctx)
+	if !ok {
+		return nil, apperr.ErrUnauthorized
+	}
+
+	cached, err := s.cache.Get(ctx, sessionID)
+	if err == nil {
+		return cached, nil
+	}
+
+	if !errors.Is(err, ErrCacheMiss) {
+		s.log.WarnContext(ctx, "session cache unavailable, falling back to database", slog.String("op", op), slog.Any("error", err))
+	}
+
+	data, err := s.loadSessionFromDB(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	s.cache.Save(ctx, *data)
+
+	return data, nil
+}
+
+func (s *service) loadSessionFromDB(ctx context.Context, sessionID string) (*SessionData, error) {
+	const op = "auth.loadSessionFromDB"
+
+	id, err := parseSessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+
+	session, err := s.sessions.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	user, err := s.users.GetByID(ctx, session.UserID)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", op, err)
+	}
+
+	data := SessionDataFrom(user, session)
+
+	return &data, nil
 }

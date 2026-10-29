@@ -1,0 +1,37 @@
+# Copy to config/config.yaml (git-ignored) or point -config / CONFIG_PATH at it.
+env: local
+
+grpc:
+  port: 9090
+  timeout: 10s
+
+db:
+  host: localhost
+  port: 5432
+  name: core
+  user: postgres
+  password: ""
+  ssl_mode: disable
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  # Optional namespace for cache keys. Empty keeps the historical
+  # "session-<id>" key format.
+  prefix: ""
+
+# Lifetime of issued access tokens.
+access_token_ttl: 1h
+# Lifetime of an authentication session (refresh token).
+session_ttl: 720h
+# Lifetime of the cached session snapshot in Redis.
+session_cache_ttl: 1h
+# Graceful shutdown budget.
+shutdown_timeout: 10s
+
+# Optional base64 encoded 32 byte ed25519 seed used to sign access tokens.
+# Generate one with: openssl rand -base64 32
+# Without it a random key is generated on every start and all issued tokens
+# become invalid after a restart.
+jwt_seed: ""

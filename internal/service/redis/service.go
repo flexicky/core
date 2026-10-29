@@ -3,85 +3,87 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
-type redisService struct {
-	redisClient redis.Client
-}
+// ErrNotFound is returned when a key does not exist.
+var ErrNotFound = errors.New("redis: key not found")
 
-type RedisService interface {
-	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
+// Service is the cache API used by the domain services.
+type Service interface {
+	Set(ctx context.Context, key string, value any, expiration time.Duration) error
 	Get(ctx context.Context, key string) (string, error)
-	Del(ctx context.Context, key ...string) error
-	Expire(ctx context.Context, key string, duration time.Duration) error
+	Del(ctx context.Context, keys ...string) error
+	Expire(ctx context.Context, key string, expiration time.Duration) error
 	Exists(ctx context.Context, key string) (bool, error)
 }
 
-func NewRedisService(adapter redis.Client) RedisService {
-	return &redisService{redisClient: adapter}
+type service struct {
+	client *redis.Client
 }
 
-func (s *redisService) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
-	var data interface{}
+func New(client *redis.Client) Service {
+	return &service{client: client}
+}
 
-	if str, ok := value.(string); ok {
-		data = str
-	} else {
-		jsonData, err := json.Marshal(value)
+// Set stores value. Plain strings are stored as is, everything else is
+// serialized to JSON.
+func (s *service) Set(ctx context.Context, key string, value any, expiration time.Duration) error {
+	data := value
+
+	if _, ok := value.(string); !ok {
+		encoded, err := json.Marshal(value)
 		if err != nil {
-			return fmt.Errorf("marshal json err: %v", err)
+			return fmt.Errorf("redis set %q: marshal: %w", key, err)
 		}
-		data = string(jsonData)
+
+		data = string(encoded)
 	}
 
-	err := s.redisClient.Set(ctx, key, data, ttl).Err()
-	if err != nil {
-		return fmt.Errorf("redis set failed: %w", err)
-	}
-
-	return nil
-}
-
-func (s *redisService) Get(ctx context.Context, key string) (string, error) {
-	val, err := s.redisClient.Get(ctx, key).Result()
-	if err == redis.Nil {
-		return "", fmt.Errorf("redis get: key not found")
-	}
-	if err != nil {
-		return "", fmt.Errorf("redis get failed: %w", err)
-	}
-
-	return val, nil
-}
-
-func (s *redisService) Del(ctx context.Context, keys ...string) error {
-	err := s.redisClient.Del(ctx, keys...).Err()
-	if err != nil {
-		return fmt.Errorf("redis del failed: %w", err)
+	if err := s.client.Set(ctx, key, data, expiration).Err(); err != nil {
+		return fmt.Errorf("redis set %q: %w", key, err)
 	}
 
 	return nil
 }
 
-func (s *redisService) Exists(ctx context.Context, key string) (bool, error) {
-	val, err := s.redisClient.Exists(ctx, key).Result()
-	if err == redis.Nil {
-		return false, fmt.Errorf("redis exists: key not found")
+func (s *service) Get(ctx context.Context, key string) (string, error) {
+	value, err := s.client.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", ErrNotFound
 	}
 	if err != nil {
-		return false, fmt.Errorf("redis exists failed: %w", err)
+		return "", fmt.Errorf("redis get %q: %w", key, err)
 	}
-	return val > 0, nil
+
+	return value, nil
 }
 
-func (s *redisService) Expire(ctx context.Context, key string, ttl time.Duration) error {
-	err := s.Expire(ctx, key, ttl)
-	if err != nil {
-		return fmt.Errorf("redis expire failed: %w", err)
+func (s *service) Del(ctx context.Context, keys ...string) error {
+	if err := s.client.Del(ctx, keys...).Err(); err != nil {
+		return fmt.Errorf("redis del %q: %w", keys, err)
 	}
+
 	return nil
+}
+
+func (s *service) Expire(ctx context.Context, key string, expiration time.Duration) error {
+	if err := s.client.Expire(ctx, key, expiration).Err(); err != nil {
+		return fmt.Errorf("redis expire %q: %w", key, err)
+	}
+
+	return nil
+}
+
+func (s *service) Exists(ctx context.Context, key string) (bool, error) {
+	count, err := s.client.Exists(ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("redis exists %q: %w", key, err)
+	}
+
+	return count > 0, nil
 }

@@ -2,22 +2,24 @@ package session
 
 import "time"
 
+// NewSession is the input of the session creation flow.
 type NewSession struct {
-	UserID       int
+	UserID       int64
 	RefreshToken string
 	UserAgent    string
-	IpAddress    string
+	IPAddress    string
 	ExpiresAt    time.Time
 }
 
+// Session is a stored session.
 type Session struct {
-	Id           int
-	UserId       int
-	CreatedAt    time.Time
-	LastUsedAt   time.Time
-	ExpiresAt    time.Time
+	ID           int64
+	UserID       int64
 	RefreshToken string
-	RevokedAt    time.Time
 	UserAgent    string
 	IPAddress    string
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
+	LastUsedAt   *time.Time
+	RevokedAt    *time.Time
 }

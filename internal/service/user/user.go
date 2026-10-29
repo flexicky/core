@@ -2,72 +2,90 @@ package user
 
 import (
 	"context"
+	"errors"
+	"fmt"
+
+	"core/internal/apperr"
 	userDto "core/internal/dto/user"
+	"core/internal/repository"
 	"core/internal/repository/user"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
-type UserCreateParams struct {
-	Email            string
-	Password         string
-	Name             string
-	TelegramId       string
-	TelegramUsername string
-	MaxId            string
-	MaxUsername      string
+// Service is the user domain API.
+type Service interface {
+	Create(ctx context.Context, params userDto.NewUser) (*userDto.User, error)
+	GetByID(ctx context.Context, id int64) (*userDto.User, error)
+	GetByEmail(ctx context.Context, email string) (*userDto.User, error)
+	CheckPassword(password, hash string) bool
 }
 
-type UserSercive interface {
-	CreateUser(ctx context.Context, params userDto.NewUser) (*userDto.User, error)
-	GetUserById(ctx context.Context, id int) (*userDto.User, error)
-	GetUserByEmail(ctx context.Context, email string) (*userDto.User, error)
-	CheckPasswordHash(password, hash string) bool
+type service struct {
+	repo user.Repository
 }
 
-type userService struct {
-	repo user.UserRepository
+func New(repo user.Repository) Service {
+	return &service{repo: repo}
 }
 
-func NewUserService(repo user.UserRepository) UserSercive {
-	return &userService{repo: repo}
-}
-
-func (s *userService) hashPassword(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	return string(bytes), err
-}
-
-func (s *userService) CheckPasswordHash(password, hash string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
-	return err == nil
-}
-
-func (s *userService) CreateUser(ctx context.Context, params userDto.NewUser) (*userDto.User, error) {
-
-	passwordHash, err := s.hashPassword(params.Password)
+func (s *service) Create(ctx context.Context, params userDto.NewUser) (*userDto.User, error) {
+	hash, err := hashPassword(params.Password)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("hash password: %w", err)
 	}
 
-	params.Password = passwordHash
+	params.Password = hash
 
-	return s.repo.Create(ctx, params)
-}
-
-func (s *userService) GetUserById(ctx context.Context, userId int) (*userDto.User, error) {
-	user, err := s.repo.GetUserById(ctx, userId)
-	if err != nil {
-		return nil, err
+	created, err := s.repo.Create(ctx, params)
+	switch {
+	case errors.Is(err, repository.ErrAlreadyExists):
+		return nil, apperr.ErrUserAlreadyExists
+	case err != nil:
+		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	return user, nil
+	return created, nil
 }
 
-func (s *userService) GetUserByEmail(ctx context.Context, email string) (*userDto.User, error) {
-	user, err := s.repo.GetUserByEmail(ctx, email)
-	if err != nil {
-		return nil, err
+func (s *service) GetByID(ctx context.Context, id int64) (*userDto.User, error) {
+	found, err := s.repo.GetByID(ctx, id)
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return nil, apperr.ErrUserNotFound
+	case err != nil:
+		return nil, fmt.Errorf("get user by id: %w", err)
 	}
-	return user, nil
+
+	return found, nil
+}
+
+func (s *service) GetByEmail(ctx context.Context, email string) (*userDto.User, error) {
+	found, err := s.repo.GetByEmail(ctx, email)
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return nil, apperr.ErrUserNotFound
+	case err != nil:
+		return nil, fmt.Errorf("get user by email: %w", err)
+	}
+
+	return found, nil
+}
+
+// CheckPassword compares a plaintext password with a bcrypt hash.
+func (s *service) CheckPassword(password, hash string) bool {
+	if hash == "" {
+		return false
+	}
+
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
+}
+
+func hashPassword(password string) (string, error) {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+
+	return string(hashed), nil
 }

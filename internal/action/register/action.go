@@ -2,76 +2,61 @@ package register
 
 import (
 	"context"
+	"log/slog"
+
+	"core/internal/apperr"
 	authType "core/internal/const/auth"
 	authDto "core/internal/dto/auth"
 	userDto "core/internal/dto/user"
-	"core/internal/service/auth"
-	authServ "core/internal/service/auth"
-	userServ "core/internal/service/user"
-	"log/slog"
+	authService "core/internal/service/auth"
+	userService "core/internal/service/user"
+	"core/internal/utils"
 
 	corev1 "github.com/flexicky/protos/core.core.v1"
 )
 
-type registrerAction struct {
+type action struct {
 	log         *slog.Logger
-	userService userServ.UserSercive
-	authService auth.AuthService
+	userService userService.Service
+	authService authService.Service
 }
 
-type RegisterAction interface {
+// Action handles the Register RPC.
+type Action interface {
 	Run(ctx context.Context, params userDto.NewUser) *corev1.RegisterResponse
 }
 
-func NewRegisterAction(log *slog.Logger, userService userServ.UserSercive, authService authServ.AuthService) RegisterAction {
-	return &registrerAction{
+func New(log *slog.Logger, userService userService.Service, authService authService.Service) Action {
+	return &action{
 		log:         log,
 		userService: userService,
 		authService: authService,
 	}
 }
 
-func (a *registrerAction) Run(ctx context.Context, params userDto.NewUser) *corev1.RegisterResponse {
-	dto := &corev1.RegisterResponse{}
+func (a *action) Run(ctx context.Context, params userDto.NewUser) *corev1.RegisterResponse {
+	if _, err := a.userService.Create(ctx, params); err != nil {
+		a.log.ErrorContext(ctx, "register user", slog.String("email", params.Email), slog.Any("error", err))
 
-	_, err := a.userService.CreateUser(ctx, params)
-
-	if err != nil {
-		msg := err.Error()
-		dto.Ok = false
-		dto.Message = &msg
-		a.log.Error("Ошибка на строне Сервера", "error", err)
-		return dto
+		return &corev1.RegisterResponse{Ok: false, Message: utils.Ptr(apperr.PublicMessage(err))}
 	}
 
-	authResult, err := a.authService.Login(
-		ctx,
-		authType.EmailAuth,
-		authDto.Login{
-			Email:    params.Email,
-			Password: params.Password,
+	result, err := a.authService.Login(ctx, authType.EmailAuth, authDto.Login{
+		Email:    params.Email,
+		Password: params.Password,
+	})
+	if err != nil {
+		a.log.ErrorContext(ctx, "login after register", slog.String("email", params.Email), slog.Any("error", err))
+
+		return &corev1.RegisterResponse{Ok: false, Message: utils.Ptr(apperr.PublicMessage(err))}
+	}
+
+	return &corev1.RegisterResponse{
+		Ok: true,
+		LoginData: &corev1.LoginResponse{
+			Ok:          true,
+			AccessToken: utils.Ptr(result.AccessToken),
+			ExpiresIn:   result.ExpiresAt.Unix(),
 		},
-	)
-	if err != nil {
-		msg := err.Error()
-		dto.Ok = false
-		dto.Message = &msg
-		a.log.Error("Auth failed", "error", err)
-
-		return dto
 	}
-
-	dto.Ok = true
-	dto.Message = nil
-
-	accessToken := authResult.Access_token
-	exp := authResult.Expires_At
-
-	dto.LoginData = &corev1.LoginResponse{
-		AccessToken: &accessToken,
-		ExpiresIn:   exp.Unix(),
-		Ok:          true,
-	}
-
-	return dto
 }

@@ -2,12 +2,14 @@ package auth
 
 import "time"
 
+// Login is the input of the login flow.
 type Login struct {
 	Email    string `validate:"required,email"`
-	Password string `validate:"required,min=6"`
+	Password string `validate:"required,min=6,max=200"`
 }
 
+// LoginResult is a successfully issued access token.
 type LoginResult struct {
-	Access_token string
-	Expires_At   time.Time
+	AccessToken string
+	ExpiresAt   time.Time
 }
