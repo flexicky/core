@@ -2,101 +2,100 @@ package user
 
 import (
 	"context"
-	userDto "core/internal/dto/user"
-	postgreStorage "core/internal/storage"
+	"errors"
 	"fmt"
+
+	userDto "core/internal/dto/user"
+	"core/internal/repository"
+
+	"github.com/jackc/pgx/v5"
 )
 
-type UserRepository interface {
+// Repository is the persistence port for users.
+type Repository interface {
 	Create(ctx context.Context, params userDto.NewUser) (*userDto.User, error)
-	GetUserById(ctx context.Context, userId int) (*userDto.User, error)
-	GetUserByEmail(ctx context.Context, email string) (*userDto.User, error)
+	GetByID(ctx context.Context, id int64) (*userDto.User, error)
+	GetByEmail(ctx context.Context, email string) (*userDto.User, error)
 }
 
-type userRepo struct {
-	pool *postgreStorage.Storage
+type repo struct {
+	db repository.Querier
 }
 
-func NewUserRepo(st *postgreStorage.Storage) UserRepository {
-	return &userRepo{pool: st}
+func New(db repository.Querier) Repository {
+	return &repo{db: db}
 }
 
-func nilStringOrNil(s string) any {
-	if s == "" {
-		return nil
+// columns is the single source of truth for the column order used by scans.
+// Explicit columns are preferred over SELECT * because a changed table layout
+// silently breaks positional scans.
+const columns = `id, name, email, pass, telegram_id, telegram_username, max_id, max_username, created_at`
+
+func scan(row pgx.Row) (*userDto.User, error) {
+	u := &userDto.User{}
+
+	err := row.Scan(
+		&u.ID,
+		&u.Name,
+		&u.Email,
+		&u.Password,
+		&u.TelegramID,
+		&u.TelegramUsername,
+		&u.MaxID,
+		&u.MaxUsername,
+		&u.CreatedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, repository.ErrNotFound
 	}
-	return s
+	if err != nil {
+		return nil, fmt.Errorf("scan user: %w", err)
+	}
+
+	return u, nil
 }
 
-func (r *userRepo) Create(ctx context.Context, params userDto.NewUser) (*userDto.User, error) {
+func (r *repo) Create(ctx context.Context, params userDto.NewUser) (*userDto.User, error) {
 	const query = `
 		INSERT INTO users (name, email, pass, telegram_id, telegram_username, max_id, max_username)
-		VALUES($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, created_at, pass
-	`
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING ` + columns
 
-	user := &userDto.User{
-		Name:             &params.Name,
-		Email:            &params.Email,
-		TelegramId:       &params.TelegramId,
-		TelegramUsername: &params.TelegramUsername,
-		MaxId:            &params.MaxId,
-		MaxUsername:      &params.MaxUsername,
-	}
-
-	err := r.pool.Pool().QueryRow(ctx, query,
-		nilStringOrNil(*user.Name),
-		nilStringOrNil(*user.Email),
-		nilStringOrNil(params.Password),
-		nilStringOrNil(*user.TelegramId),
-		nilStringOrNil(*user.TelegramUsername),
-		nilStringOrNil(*user.MaxId),
-		nilStringOrNil(*user.MaxUsername),
-	).Scan(&user.Id, &user.CreatedAt, &user.Password)
+	created, err := scan(r.db.QueryRow(
+		ctx,
+		query,
+		nullable(params.Name),
+		nullable(params.Email),
+		nullable(params.Password),
+		nullable(params.TelegramID),
+		nullable(params.TelegramUsername),
+		nullable(params.MaxID),
+		nullable(params.MaxUsername),
+	))
 	if err != nil {
-		return nil, err
+		return nil, repository.Translate(err)
 	}
 
-	return user, nil
+	return created, nil
 }
 
-func (r *userRepo) GetUserByEmail(ctx context.Context, email string) (*userDto.User, error) {
-	query := `
-    SELECT *
-    FROM users
-    WHERE email = $1
-`
+func (r *repo) GetByID(ctx context.Context, id int64) (*userDto.User, error) {
+	const query = `SELECT ` + columns + ` FROM users WHERE id = $1`
 
-	user := &userDto.User{}
-
-	err := r.pool.Pool().QueryRow(ctx, query, email).Scan(&user.Id,
-		&user.Name,
-		&user.Email,
-		&user.Password,
-		&user.TelegramId,
-		&user.TelegramUsername,
-		&user.MaxId,
-		&user.MaxUsername,
-		&user.CreatedAt,
-	)
-	if err != nil {
-
-		fmt.Println("err seelcted ", err)
-		return nil, err
-	}
-
-	return user, nil
+	return scan(r.db.QueryRow(ctx, query, id))
 }
 
-func (r *userRepo) GetUserById(ctx context.Context, userId int) (*userDto.User, error) {
-	query := `SELECT id, name, email, created_at FROM users WHERE id = $1`
+func (r *repo) GetByEmail(ctx context.Context, email string) (*userDto.User, error) {
+	const query = `SELECT ` + columns + ` FROM users WHERE email = $1`
 
-	user := &userDto.User{}
+	return scan(r.db.QueryRow(ctx, query, email))
+}
 
-	err := r.pool.Pool().QueryRow(ctx, query, userId).Scan(&user.Id, &user.Name, &user.Email, &user.CreatedAt)
-	if err != nil {
-		return nil, err
+// nullable stores an empty string as SQL NULL.
+func nullable(value string) any {
+	if value == "" {
+		return nil
 	}
 
-	return user, nil
+	return value
 }

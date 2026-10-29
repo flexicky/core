@@ -2,45 +2,42 @@ package me
 
 import (
 	"context"
-	authService "core/internal/service/auth"
 	"log/slog"
 	"strconv"
+
+	"core/internal/apperr"
+	authService "core/internal/service/auth"
+	"core/internal/utils"
 
 	corev1 "github.com/flexicky/protos/core.core.v1"
 )
 
-type meAction struct {
+type action struct {
 	log         *slog.Logger
-	authService authService.AuthService
+	authService authService.Service
 }
 
-type MeAction interface {
+// Action handles the Me RPC.
+type Action interface {
 	Run(ctx context.Context) *corev1.MeResponse
 }
 
-func NewMeAction(log *slog.Logger, authService authService.AuthService) MeAction {
-	return &meAction{
-		log:         log,
-		authService: authService,
-	}
+func New(log *slog.Logger, authService authService.Service) Action {
+	return &action{log: log, authService: authService}
 }
 
-func (a *meAction) Run(ctx context.Context) *corev1.MeResponse {
-	dto := &corev1.MeResponse{}
-
-	data, err := a.authService.GetCurrentSession(ctx)
+func (a *action) Run(ctx context.Context) *corev1.MeResponse {
+	data, err := a.authService.CurrentSession(ctx)
 	if err != nil {
-		dto.Ok = false
-		mgs := err.Error()
-		dto.Message = &mgs
-		a.log.Warn(err.Error())
-		return dto
+		a.log.WarnContext(ctx, "get current session", slog.Any("error", err))
+
+		return &corev1.MeResponse{Ok: false, Message: utils.Ptr(apperr.PublicMessage(err))}
 	}
 
-	dto.Ok = true
-	dto.Name = data.UserName
-	dto.UserId = strconv.Itoa(int(data.UserId))
-	dto.Email = data.UserEmail
-
-	return dto
+	return &corev1.MeResponse{
+		Ok:     true,
+		Name:   data.UserName,
+		Email:  data.UserEmail,
+		UserId: strconv.FormatInt(data.UserID, 10),
+	}
 }

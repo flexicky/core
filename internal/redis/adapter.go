@@ -4,9 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+)
+
+const (
+	connectTimeout = 5 * time.Second
+	poolSize       = 10
+	minIdleConns   = 5
+	maxRetries     = 5
 )
 
 type RedisConfig struct {
@@ -17,51 +26,44 @@ type RedisConfig struct {
 }
 
 type RedisAdapter struct {
-	Client *redis.Client
+	client *redis.Client
 	log    *slog.Logger
 }
 
-func connect(cfg RedisConfig, log *slog.Logger) (*redis.Client, error) {
+// NewRedisAdapter connects to Redis and verifies the connection with PING.
+func NewRedisAdapter(cfg RedisConfig, log *slog.Logger) (*RedisAdapter, error) {
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+
 	client := redis.NewClient(&redis.Options{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Addr:         addr,
 		Password:     cfg.Password,
-		DB:           0,
-		PoolSize:     10,
-		MinIdleConns: 5,
-		MaxRetries:   5,
+		PoolSize:     poolSize,
+		MinIdleConns: minIdleConns,
+		MaxRetries:   maxRetries,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect to redis: %w", err)
+		_ = client.Close()
+
+		return nil, fmt.Errorf("ping redis at %s: %w", addr, err)
 	}
 
-	log.Info("Redis connected successfully", "host", cfg.Host, "port", cfg.Port)
+	log.Info("redis connected", slog.String("addr", addr))
 
-	return client, nil
+	return &RedisAdapter{client: client, log: log}, nil
 }
 
-func NewRedisAdapter(cfg RedisConfig, log *slog.Logger) (*RedisAdapter, error) {
-	redisConnection, err := connect(cfg, log)
-	if err != nil {
-		return nil, err
+func (a *RedisAdapter) Client() *redis.Client {
+	return a.client
+}
+
+func (a *RedisAdapter) Stop() error {
+	if a.client == nil {
+		return nil
 	}
 
-	return &RedisAdapter{
-		Client: redisConnection,
-		log:    log,
-	}, nil
-}
-
-func (a *RedisAdapter) GetRedisClient() *redis.Client {
-	return a.Client
-}
-
-func (r *RedisAdapter) Stop() error {
-	if r.Client != nil {
-		return r.Client.Close()
-	}
-	return nil
+	return a.client.Close()
 }

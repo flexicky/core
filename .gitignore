@@ -1,4 +1,5 @@
-/config
+/config/*
+!/config/config.example.yaml
 go.mode
 # Binaries for programs and plugins
 *.exe

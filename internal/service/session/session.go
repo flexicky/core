@@ -2,71 +2,58 @@ package session
 
 import (
 	"context"
-	sessionDto "core/internal/dto/session"
-	"core/internal/repository/session"
-	"core/internal/repository/user"
+	"errors"
+	"fmt"
 	"time"
+
+	"core/internal/apperr"
+	sessionDto "core/internal/dto/session"
+	"core/internal/repository"
+	"core/internal/repository/session"
 )
 
-type sessionService struct {
-	userRepo    user.UserRepository
-	sessionRepo session.SessionRepo
+// Service is the session domain API.
+type Service interface {
+	Create(ctx context.Context, params sessionDto.NewSession) (*sessionDto.Session, error)
+	GetByID(ctx context.Context, id int64) (*sessionDto.Session, error)
+	DeleteExpired(ctx context.Context, before time.Time) (int64, error)
 }
 
-type SessionService interface {
-	CreateSession(ctx context.Context, params sessionDto.NewSession) (*sessionDto.Session, error)
-	GetSessionByExpiresA(ctx context.Context, exp time.Time) ([]int64, error)
-	DeleteSessionById(ctx context.Context, id int) error
-	GetSessionByUserId(ctx context.Context, UserId int) (*sessionDto.Session, error)
-	GetSessionById(ctx context.Context, id int) (*sessionDto.Session, error)
+type service struct {
+	repo session.Repository
 }
 
-func NewSessionService(userRepo user.UserRepository, sessionRepo session.SessionRepo) SessionService {
-	return &sessionService{userRepo: userRepo, sessionRepo: sessionRepo}
+func New(repo session.Repository) Service {
+	return &service{repo: repo}
 }
 
-func (s *sessionService) CreateSession(ctx context.Context, params sessionDto.NewSession) (*sessionDto.Session, error) {
-	sessionData, err := s.sessionRepo.CreateSession(ctx, params)
+func (s *service) Create(ctx context.Context, params sessionDto.NewSession) (*sessionDto.Session, error) {
+	created, err := s.repo.Create(ctx, params)
 	if err != nil {
-		return &sessionDto.Session{}, err
+		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	return sessionData, nil
+	return created, nil
 }
 
-func (s *sessionService) GetSessionById(ctx context.Context, id int) (*sessionDto.Session, error) {
-	session, err := s.sessionRepo.GetSessionById(ctx, id)
-	if err != nil {
-		return nil, err
+func (s *service) GetByID(ctx context.Context, id int64) (*sessionDto.Session, error) {
+	found, err := s.repo.GetByID(ctx, id)
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return nil, apperr.ErrSessionNotFound
+	case err != nil:
+		return nil, fmt.Errorf("get session by id: %w", err)
 	}
-	return session, nil
+
+	return found, nil
 }
 
-func (s *sessionService) GetSessionByUserId(ctx context.Context, UserId int) (*sessionDto.Session, error) {
-	session, err := s.sessionRepo.GetSessionByUserId(ctx, UserId)
+// DeleteExpired removes sessions that are already expired.
+func (s *service) DeleteExpired(ctx context.Context, before time.Time) (int64, error) {
+	deleted, err := s.repo.DeleteExpired(ctx, before)
 	if err != nil {
-		return nil, err
-	}
-	return session, nil
-}
-
-func (s *sessionService) DeleteSessionById(ctx context.Context, id int) error {
-	err := s.sessionRepo.RevokeSessionByUserId(ctx, id)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *sessionService) GetSessionByExpiresA(ctx context.Context, exp time.Time) ([]int64, error) {
-	ids, err := s.sessionRepo.GetSessionByExpiresAt(ctx, exp)
-	if err != nil {
-		return nil, err
+		return 0, fmt.Errorf("delete expired sessions: %w", err)
 	}
 
-	if len(ids) == 0 {
-		return ids, nil
-	}
-
-	return ids, nil
+	return deleted, nil
 }

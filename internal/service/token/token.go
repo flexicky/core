@@ -1,79 +1,129 @@
 package token
 
 import (
-	tokenDto "core/internal/dto/token"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
+
+	"core/internal/apperr"
+	tokenDto "core/internal/dto/token"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-type TokenService struct {
+// SeedSize is the size of an ed25519 seed in bytes.
+const SeedSize = ed25519.SeedSize
+
+// Service issues and validates access tokens.
+type Service interface {
+	CreateAccessToken(userID, sessionID int64) (token string, expiresAt time.Time, err error)
+	CreateRefreshToken() (token string, hash string, err error)
+	ParseAccessToken(token string) (*tokenDto.Claims, error)
+}
+
+type service struct {
 	privateKey ed25519.PrivateKey
 	publicKey  ed25519.PublicKey
+	ttl        time.Duration
+	now        func() time.Time
 }
 
-func NewTokenService(privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey) *TokenService {
-	return &TokenService{privateKey: privateKey, publicKey: publicKey}
+func New(privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey, ttl time.Duration) Service {
+	return &service{
+		privateKey: privateKey,
+		publicKey:  publicKey,
+		ttl:        ttl,
+		now:        time.Now,
+	}
 }
 
-func (s *TokenService) CreateAccessToken(userId, sessionId int) (string, error) {
-	now := time.Now()
+// KeysFromSeed derives a stable ed25519 key pair from a 32 byte seed.
+func KeysFromSeed(seed []byte) (ed25519.PrivateKey, ed25519.PublicKey, error) {
+	if len(seed) != SeedSize {
+		return nil, nil, fmt.Errorf("ed25519 seed must be %d bytes, got %d", SeedSize, len(seed))
+	}
+
+	privateKey := ed25519.NewKeyFromSeed(seed)
+	publicKey, ok := privateKey.Public().(ed25519.PublicKey)
+	if !ok {
+		return nil, nil, errors.New("unexpected public key type")
+	}
+
+	return privateKey, publicKey, nil
+}
+
+// GenerateKeys creates a new random ed25519 key pair.
+func GenerateKeys() (ed25519.PrivateKey, ed25519.PublicKey, error) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate ed25519 keys: %w", err)
+	}
+
+	return privateKey, publicKey, nil
+}
+
+func (s *service) CreateAccessToken(userID, sessionID int64) (string, time.Time, error) {
+	now := s.now()
+	expiresAt := now.Add(s.ttl)
 
 	claims := &tokenDto.Claims{
-		SessionId: strconv.Itoa(sessionId),
+		SessionID: strconv.FormatInt(sessionID, 10),
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   strconv.Itoa(userId),
+			Subject:   strconv.FormatInt(userID, 10),
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(20 * time.Minute)),
-			ID:        strconv.Itoa(userId),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ID:        strconv.FormatInt(userID, 10),
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-
-	signedToken, err := token.SignedString(s.privateKey)
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims).SignedString(s.privateKey)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, fmt.Errorf("sign access token: %w", err)
 	}
 
-	return signedToken, nil
+	return signed, expiresAt, nil
 }
 
-func (s *TokenService) CreateRefreshToken() (token string, hash string, err error) {
-	bytes := make([]byte, 32)
-
-	if _, err := rand.Read(bytes); err != nil {
-		return "", "", err
+// CreateRefreshToken returns an opaque refresh token and the hash that should
+// be persisted instead of the token itself.
+func (s *service) CreateRefreshToken() (string, string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", "", fmt.Errorf("generate refresh token: %w", err)
 	}
 
-	token = base64.RawURLEncoding.EncodeToString(bytes)
+	refreshToken := base64.RawURLEncoding.EncodeToString(buf)
+	hash := sha256.Sum256([]byte(refreshToken))
 
-	hashBytes := sha256.Sum256([]byte(token))
-
-	hash = base64.RawURLEncoding.EncodeToString(hashBytes[:])
-
-	return token, hash, nil
+	return refreshToken, base64.RawURLEncoding.EncodeToString(hash[:]), nil
 }
 
-func (s *TokenService) ParseAccessToken(token string) (*tokenDto.Claims, error) {
+func (s *service) ParseAccessToken(raw string) (*tokenDto.Claims, error) {
 	claims := &tokenDto.Claims{}
-	tkn, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (any, error) {
-		if token.Method != jwt.SigningMethodEdDSA {
-			return nil, errors.New("unexpected signing method")
-		}
-		return s.publicKey, nil
-	})
+
+	parsed, err := jwt.ParseWithClaims(
+		raw,
+		claims,
+		func(t *jwt.Token) (any, error) {
+			if t.Method != jwt.SigningMethodEdDSA {
+				return nil, fmt.Errorf("unexpected signing method: %v", t.Method.Alg())
+			}
+
+			return s.publicKey, nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodEdDSA.Alg()}),
+	)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(apperr.ErrInvalidToken, err)
 	}
-	if !tkn.Valid {
-		return nil, errors.New("invalid token")
+
+	if !parsed.Valid {
+		return nil, apperr.ErrInvalidToken
 	}
 
 	return claims, nil

@@ -2,83 +2,95 @@ package main
 
 import (
 	"context"
-	"core/internal/app"
-	"core/internal/config"
-	redisAdapter "core/internal/redis"
-	"core/internal/storage"
+	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
+
+	"core/internal/app"
+	"core/internal/config"
+	"core/internal/logger"
+	redisAdapter "core/internal/redis"
+	"core/internal/storage"
 )
 
 func main() {
-	cfg := config.MustLoad()
+	if err := run(); err != nil {
+		slog.Error("application failed", slog.Any("error", err))
+		os.Exit(1)
+	}
+}
 
-	log := setupLogger(cfg.Env)
+func run() error {
+	configPath := flag.String("config", os.Getenv("CONFIG_PATH"), "path to the configuration file")
+	flag.Parse()
 
-	log.Info("starting application")
+	cfg := config.MustLoad(*configPath)
 
-	if cfg.Env == envLocal {
-		log.Info("cfg data - ", cfg)
+	log := logger.New(cfg.Env).With(slog.String("service", "core"))
+
+	log.Info("starting application", slog.String("env", cfg.Env))
+
+	application, err := app.New(log, appConfig(cfg))
+	if err != nil {
+		return err
 	}
 
-	application := app.New(log, cfg.GRPC.Port, cfg.StoragePath, cfg.TokenTTL, storage.DBConfig{
-		Host:     cfg.DB.Host,
-		User:     cfg.DB.User,
-		Password: cfg.DB.Password,
-		Port:     cfg.DB.Port,
-		SSLMode:  cfg.DB.SslMode,
-		Name:     cfg.DB.Name,
-	}, redisAdapter.RedisConfig{
-		Host:     cfg.Redis.Host,
-		Port:     cfg.Redis.Port,
-		Password: cfg.Redis.Password,
-	})
-
-	go application.GRPCServer.MustRun()
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- application.Run()
+	}()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(stop)
 
-	sign := <-stop
+	select {
+	case err := <-serverErr:
+		if err != nil {
+			return err
+		}
 
-	log.Info("sttoping application", slog.String("signal", sign.String()))
+		return nil
+	case sign := <-stop:
+		log.Info("shutdown signal received", slog.String("signal", sign.String()))
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
-	if err := application.Shotdown(ctx); err != nil {
-		log.Error("graceful shutdown error", "error", err)
+	if err := application.Shutdown(ctx); err != nil {
+		return err
 	}
 
-	log.Info("Application stopped")
+	log.Info("application stopped")
+
+	return nil
 }
 
-const (
-	envLocal = "local"
-	envDev   = "dev"
-	envProd  = "prod"
-)
-
-func setupLogger(env string) *slog.Logger {
-	var log *slog.Logger
-
-	switch env {
-	case envLocal:
-		log = slog.New(
-			slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}),
-		)
-	case envDev:
-		log = slog.New(
-			slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}),
-		)
-	case envProd:
-		log = slog.New(
-			slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}),
-		)
+func appConfig(cfg *config.Config) app.Config {
+	return app.Config{
+		GRPCPort:        cfg.GRPC.Port,
+		AccessTokenTTL:  cfg.AccessTokenTTL,
+		SessionTTL:      cfg.SessionTTL,
+		SessionCacheTTL: cfg.SessionCacheTTL,
+		// Clean up expired sessions twice per session cache lifetime.
+		SessionCleanupInterval: cfg.SessionCacheTTL / 2,
+		JWTSeed:                cfg.JWTSeed,
+		DB: storage.DBConfig{
+			Host:     cfg.DB.Host,
+			Port:     cfg.DB.Port,
+			Name:     cfg.DB.Name,
+			User:     cfg.DB.User,
+			Password: cfg.DB.Password,
+			SSLMode:  cfg.DB.SSLMode,
+		},
+		Redis: redisAdapter.RedisConfig{
+			Host:     cfg.Redis.Host,
+			Port:     cfg.Redis.Port,
+			Password: cfg.Redis.Password,
+			Prefix:   cfg.Redis.Prefix,
+		},
 	}
-
-	return log
 }

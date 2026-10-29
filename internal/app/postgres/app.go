@@ -2,55 +2,40 @@ package postgresapp
 
 import (
 	"context"
-	postgresStorage "core/internal/storage"
 	"fmt"
 	"log/slog"
 	"time"
+
+	"core/internal/storage"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const connectTimeout = 5 * time.Second
 
 type App struct {
 	log     *slog.Logger
-	storage postgresStorage.Storage
-	cfg     postgresStorage.DBConfig
+	storage *storage.Storage
 }
 
-func New(
-	log *slog.Logger,
-	cfg postgresStorage.DBConfig,
-) (*App, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func New(log *slog.Logger, cfg storage.DBConfig) (*App, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
 	defer cancel()
 
-	storageInstance, err := postgresStorage.New(ctx, cfg, log)
+	instance, err := storage.New(ctx, cfg, log)
 	if err != nil {
-		return nil, fmt.Errorf("does not init db pull: %w", err)
+		return nil, fmt.Errorf("init postgres: %w", err)
 	}
 
-	return &App{
-		log:     log,
-		storage: *storageInstance,
-		cfg:     cfg,
-	}, nil
+	return &App{log: log, storage: instance}, nil
 }
 
-func (a *App) Stop(ctx context.Context) error {
-	done := make(chan struct{})
-
-	go func() {
-		a.storage.Close()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		a.log.Info("database pool closed successfuly")
-		return nil
-	case <-ctx.Done():
-		a.log.Warn("database pool close time out", slog.Any("error context", ctx.Err()))
-		return fmt.Errorf("shotdown timeout: %w", ctx.Err())
-	}
+func (a *App) Pool() *pgxpool.Pool {
+	return a.storage.Pool()
 }
 
-func (a *App) GetStorage() postgresStorage.Storage {
-	return a.storage
+func (a *App) Stop(_ context.Context) error {
+	a.storage.Close()
+
+	return nil
 }

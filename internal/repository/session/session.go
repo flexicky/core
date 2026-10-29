@@ -2,110 +2,105 @@ package session
 
 import (
 	"context"
-	"core/internal/dto/session"
-	postgreStorage "core/internal/storage"
+	"errors"
+	"fmt"
 	"time"
+
+	sessionDto "core/internal/dto/session"
+	"core/internal/repository"
+
+	"github.com/jackc/pgx/v5"
 )
 
-type sessionRepo struct {
-	pool *postgreStorage.Storage
+// Repository is the persistence port for sessions.
+type Repository interface {
+	Create(ctx context.Context, params sessionDto.NewSession) (*sessionDto.Session, error)
+	GetByID(ctx context.Context, id int64) (*sessionDto.Session, error)
+	GetLatestByUserID(ctx context.Context, userID int64) (*sessionDto.Session, error)
+	DeleteExpired(ctx context.Context, before time.Time) (int64, error)
 }
 
-type SessionRepo interface {
-	CreateSession(ctx context.Context, params session.NewSession) (*session.Session, error)
-	GetSessionById(ctx context.Context, id int) (*session.Session, error)
-	GetSessionByUserId(ctx context.Context, userId int) (*session.Session, error)
-	GetSessionByExpiresAt(ctx context.Context, exp time.Time) ([]int64, error)
-	RevokeSessionByUserId(ctx context.Context, userId int) error
+type repo struct {
+	db repository.Querier
 }
 
-func NewSessionRepo(st *postgreStorage.Storage) SessionRepo {
-	return &sessionRepo{pool: st}
+func New(db repository.Querier) Repository {
+	return &repo{db: db}
 }
 
-func (r *sessionRepo) CreateSession(ctx context.Context, params session.NewSession) (*session.Session, error) {
-	query := `
-		INSERT INTO sessions 
-    	(user_id, refresh_token, user_agent, ip_address, expires_at) 
-		VALUES ($1, $2, $3, $4, $5) 
-		RETURNING id 
-	`
-	sessionData := &session.Session{
-		RefreshToken: params.RefreshToken,
-		UserId:       params.UserID,
-		ExpiresAt:    params.ExpiresAt,
-		UserAgent:    params.UserAgent,
-		IPAddress:    params.IpAddress,
+const columns = `id, user_id, refresh_token, user_agent, ip_address, expires_at, revoked_at, created_at, last_used_at`
+
+func scan(row pgx.Row) (*sessionDto.Session, error) {
+	s := &sessionDto.Session{}
+
+	err := row.Scan(
+		&s.ID,
+		&s.UserID,
+		&s.RefreshToken,
+		&s.UserAgent,
+		&s.IPAddress,
+		&s.ExpiresAt,
+		&s.RevokedAt,
+		&s.CreatedAt,
+		&s.LastUsedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, repository.ErrNotFound
 	}
-	err := r.pool.Pool().QueryRow(ctx, query,
-		sessionData.UserId,
-		sessionData.RefreshToken,
-		sessionData.UserAgent,
-		sessionData.IPAddress,
-		sessionData.ExpiresAt,
-	).Scan(&sessionData.Id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scan session: %w", err)
 	}
 
-	return sessionData, nil
+	return s, nil
 }
 
-func (r *sessionRepo) GetSessionById(ctx context.Context, id int) (*session.Session, error) {
-	query := `SELECT * FROM sessions where id = $1`
+func (r *repo) Create(ctx context.Context, params sessionDto.NewSession) (*sessionDto.Session, error) {
+	const query = `
+		INSERT INTO sessions (user_id, refresh_token, user_agent, ip_address, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING ` + columns
 
-	session := &session.Session{}
-
-	err := r.pool.Pool().QueryRow(ctx, query, id).Scan(&session.Id, &session.UserId, &session.CreatedAt, &session.LastUsedAt, &session.ExpiresAt, &session.RefreshToken, &session.RevokedAt, &session.UserAgent, &session.IPAddress)
+	created, err := scan(r.db.QueryRow(
+		ctx,
+		query,
+		params.UserID,
+		params.RefreshToken,
+		params.UserAgent,
+		params.IPAddress,
+		params.ExpiresAt,
+	))
 	if err != nil {
-		return nil, err
+		return nil, repository.Translate(err)
 	}
 
-	return session, nil
+	return created, nil
 }
 
-func (r *sessionRepo) GetSessionByUserId(ctx context.Context, userId int) (*session.Session, error) {
-	query := `SELECT * FROM sessions where user_id = $1`
+func (r *repo) GetByID(ctx context.Context, id int64) (*sessionDto.Session, error) {
+	const query = `SELECT ` + columns + ` FROM sessions WHERE id = $1`
 
-	session := &session.Session{}
-
-	err := r.pool.Pool().QueryRow(ctx, query, userId).Scan(&session.Id, &session.UserId, &session.CreatedAt, &session.LastUsedAt, &session.ExpiresAt, &session.RefreshToken, &session.RevokedAt, &session.UserAgent, &session.IPAddress)
-	if err != nil {
-		return nil, err
-	}
-
-	return session, nil
+	return scan(r.db.QueryRow(ctx, query, id))
 }
 
-func (r *sessionRepo) GetSessionByExpiresAt(ctx context.Context, exp time.Time) ([]int64, error) {
-	query := `SELECT id FROM sessions WHERE expires_at < $1`
+func (r *repo) GetLatestByUserID(ctx context.Context, userID int64) (*sessionDto.Session, error) {
+	const query = `SELECT ` + columns + `
+		FROM sessions
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1`
 
-	rows, err := r.pool.Pool().Query(ctx, query, exp)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []int64
-
-	for rows.Next() {
-		var id int64
-
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-
-		ids = append(ids, id)
-	}
-
-	return ids, nil
+	return scan(r.db.QueryRow(ctx, query, userID))
 }
 
-func (r *sessionRepo) RevokeSessionByUserId(ctx context.Context, userId int) error {
-	query := `DELETE FROM sessions WHERE id = $1`
-	_, err := r.pool.Pool().Exec(ctx, query, userId)
+// DeleteExpired removes every session that expired before the given moment and
+// returns the number of deleted rows.
+func (r *repo) DeleteExpired(ctx context.Context, before time.Time) (int64, error) {
+	const query = `DELETE FROM sessions WHERE expires_at < $1`
+
+	tag, err := r.db.Exec(ctx, query, before)
 	if err != nil {
-		return err
+		return 0, fmt.Errorf("delete expired sessions: %w", err)
 	}
-	return nil
+
+	return tag.RowsAffected(), nil
 }
